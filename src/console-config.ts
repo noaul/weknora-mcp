@@ -10,6 +10,9 @@ const schema = z.object({
   OAUTH_CLIENT_ID: z.string().min(1),
   OAUTH_CLIENT_SECRET_FILE: z.string().min(1),
   OAUTH_REQUIRED_ROLE: z.string().min(1).default("weknora-admin"),
+  KEYCLOAK_ADMIN_URL: z.string().url(),
+  KEYCLOAK_SERVICE_CLIENT_ID: z.string().min(1),
+  KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: z.string().min(1),
   SESSION_SECRET_FILE: z.string().min(1),
   KNOWLEDGE_POLICY_FILE: z.string().min(1),
   KNOWLEDGE_AUDIT_FILE: z.string().min(1),
@@ -35,6 +38,9 @@ export interface ConsoleConfig {
   clientId: string;
   clientSecretFile: string;
   requiredRole: string;
+  keycloakAdminUrl: URL;
+  keycloakServiceClientId: string;
+  keycloakServiceClientSecretFile: string;
   sessionSecretFile: string;
   policyFile: string;
   auditFile: string;
@@ -73,6 +79,7 @@ export function parseConsoleConfig(
   const issuer = new URL(parsed.data.OAUTH_ISSUER);
   const jwksUrl = new URL(parsed.data.OAUTH_JWKS_URL);
   const tokenUrl = new URL(parsed.data.OAUTH_TOKEN_URL);
+  const keycloakAdminUrl = new URL(parsed.data.KEYCLOAK_ADMIN_URL);
   const weknoraApiUrl = new URL(parsed.data.WEKNORA_API_URL);
   const readGatewayHealthUrl = new URL(parsed.data.READ_GATEWAY_HEALTH_URL);
   const adminGatewayHealthUrl = new URL(parsed.data.ADMIN_GATEWAY_HEALTH_URL);
@@ -81,6 +88,7 @@ export function parseConsoleConfig(
   requireHttps("OAUTH_ISSUER", issuer);
   requireHttpsOrLoopback("OAUTH_JWKS_URL", jwksUrl);
   requireLoopback("OAUTH_TOKEN_URL", tokenUrl);
+  requireLoopback("KEYCLOAK_ADMIN_URL", keycloakAdminUrl);
   requireLoopback("WEKNORA_API_URL", weknoraApiUrl);
   requireLoopback("READ_GATEWAY_HEALTH_URL", readGatewayHealthUrl);
   requireLoopback("ADMIN_GATEWAY_HEALTH_URL", adminGatewayHealthUrl);
@@ -100,6 +108,10 @@ export function parseConsoleConfig(
     clientId: parsed.data.OAUTH_CLIENT_ID,
     clientSecretFile: parsed.data.OAUTH_CLIENT_SECRET_FILE,
     requiredRole: parsed.data.OAUTH_REQUIRED_ROLE,
+    keycloakAdminUrl,
+    keycloakServiceClientId: parsed.data.KEYCLOAK_SERVICE_CLIENT_ID,
+    keycloakServiceClientSecretFile:
+      parsed.data.KEYCLOAK_SERVICE_CLIENT_SECRET_FILE,
     sessionSecretFile: parsed.data.SESSION_SECRET_FILE,
     policyFile: parsed.data.KNOWLEDGE_POLICY_FILE,
     auditFile: parsed.data.KNOWLEDGE_AUDIT_FILE,

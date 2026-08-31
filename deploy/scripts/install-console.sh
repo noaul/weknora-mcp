@@ -34,5 +34,19 @@ if [[ ! -f /etc/weknora-mcp-console/console.env ]]; then
     /etc/weknora-mcp-console/console.env
 fi
 
+ensure_env_setting() {
+  local key="$1"
+  local value="$2"
+  if ! grep -q "^${key}=" /etc/weknora-mcp-console/console.env; then
+    printf '%s=%s\n' "$key" "$value" >> /etc/weknora-mcp-console/console.env
+  fi
+}
+
+ensure_env_setting KEYCLOAK_ADMIN_URL \
+  http://127.0.0.1:18195/oauth/admin/realms/weknora/
+ensure_env_setting KEYCLOAK_SERVICE_CLIENT_ID weknora-mcp-console-admin
+ensure_env_setting KEYCLOAK_SERVICE_CLIENT_SECRET_FILE \
+  /etc/weknora-mcp-console/keycloak-admin-client-secret
+
 systemctl daemon-reload
-echo "Console directories and systemd unit installed. Add the three secret files before starting the service."
+echo "Console directories and systemd unit installed. Add the four secret files before starting the service."

@@ -23,7 +23,12 @@
       </div>
     </header>
 
-    <main class="workspace">
+    <nav class="view-tabs" aria-label="管理视图">
+      <button class="view-tab active" type="button" data-view="knowledge" aria-selected="true">知识库</button>
+      <button class="view-tab" type="button" data-view="oauth" aria-selected="false">OAuth 客户端</button>
+    </nav>
+
+    <main id="knowledge-view" class="workspace app-view">
       <section class="primary-column" aria-labelledby="knowledge-title">
         <div class="section-heading">
           <div>
@@ -86,6 +91,43 @@
       </aside>
     </main>
 
+    <main id="oauth-view" class="oauth-workspace app-view" hidden>
+      <section class="oauth-main" aria-labelledby="oauth-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">CHATGPT / CLAUDE</p>
+            <h1 id="oauth-title">OAuth 客户端</h1>
+          </div>
+          <button id="refresh-oauth-clients" class="button button-quiet" type="button">刷新</button>
+        </div>
+        <div id="oauth-client-list" class="oauth-client-list" aria-busy="true"></div>
+        <div id="oauth-empty-state" class="empty-state" hidden>没有可管理的客户端</div>
+      </section>
+
+      <aside class="oauth-side" aria-label="OAuth 状态">
+        <section class="panel" aria-labelledby="oauth-summary-title">
+          <div class="panel-heading">
+            <h2 id="oauth-summary-title">授权状态</h2>
+          </div>
+          <dl class="policy-summary">
+            <div><dt>已启用</dt><dd id="oauth-enabled-count">-</dd></div>
+            <div><dt>活跃会话</dt><dd id="oauth-session-count">-</dd></div>
+            <div><dt>管理范围</dt><dd>4 个客户端</dd></div>
+          </dl>
+        </section>
+        <section class="panel" aria-labelledby="console-client-title">
+          <div class="panel-heading">
+            <h2 id="console-client-title">Console 登录</h2>
+          </div>
+          <dl class="connection-summary">
+            <div><dt>Client ID</dt><dd>weknora-mcp-console</dd></div>
+            <div><dt>Scope</dt><dd>weknora:console</dd></div>
+            <div><dt>角色</dt><dd>weknora-admin</dd></div>
+          </dl>
+        </section>
+      </aside>
+    </main>
+
     <div id="app-status" class="toast" aria-live="polite" hidden></div>
 
     <dialog id="confirm-dialog" class="confirm-dialog">
@@ -95,6 +137,32 @@
         <div class="dialog-actions">
           <button class="button button-quiet" value="cancel">取消</button>
           <button id="confirm-save" class="button button-primary" value="confirm">确认应用</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="oauth-confirm-dialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2 id="oauth-confirm-title">确认操作</h2>
+        <p id="oauth-confirm-summary"></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" value="cancel">取消</button>
+          <button id="oauth-confirm-action" class="button button-danger" value="confirm">确认</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="oauth-secret-dialog" class="confirm-dialog secret-dialog">
+      <form method="dialog">
+        <h2>新 Client Secret</h2>
+        <p>关闭后页面不会再次显示该密钥。</p>
+        <label class="secret-field">
+          <span>Client Secret</span>
+          <input id="oauth-secret-value" type="text" readonly spellcheck="false" />
+        </label>
+        <div class="dialog-actions">
+          <button id="copy-oauth-secret" class="button button-quiet" type="button">复制</button>
+          <button class="button button-primary" value="close">关闭</button>
         </div>
       </form>
     </dialog>

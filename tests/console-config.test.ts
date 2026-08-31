@@ -14,6 +14,10 @@ const validEnv = {
   OAUTH_CLIENT_ID: "weknora-mcp-console",
   OAUTH_CLIENT_SECRET_FILE: "/run/secrets/oauth-client",
   OAUTH_REQUIRED_ROLE: "weknora-admin",
+  KEYCLOAK_ADMIN_URL:
+    "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
+  KEYCLOAK_SERVICE_CLIENT_ID: "weknora-mcp-console-admin",
+  KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: "/run/secrets/keycloak-admin-client",
   SESSION_SECRET_FILE: "/run/secrets/session",
   KNOWLEDGE_POLICY_FILE: "/var/lib/weknora-mcp-console/knowledge-policy.json",
   KNOWLEDGE_AUDIT_FILE: "/var/lib/weknora-mcp-console/audit.ndjson",
@@ -39,6 +43,9 @@ describe("console configuration", () => {
       "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/token",
     );
     expect(config.fallbackKnowledgeBase.name).toBe("镍基合金");
+    expect(config.keycloakAdminUrl.href).toBe(
+      "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
+    );
   });
 
   it("rejects public HTTP and non-loopback internal services", () => {
@@ -59,6 +66,13 @@ describe("console configuration", () => {
         ...validEnv,
         OAUTH_TOKEN_URL:
           "http://10.0.0.4:18195/oauth/realms/weknora/protocol/openid-connect/token",
+      }),
+    ).toThrow(/loopback/i);
+    expect(() =>
+      parseConsoleConfig({
+        ...validEnv,
+        KEYCLOAK_ADMIN_URL:
+          "http://10.0.0.4:18195/oauth/admin/realms/weknora/",
       }),
     ).toThrow(/loopback/i);
   });

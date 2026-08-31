@@ -24,6 +24,52 @@ function createFixture() {
     };
     return { ...policy, updatedAt: "2026-08-31T16:00:00.000Z", updatedBy: actor.username };
   });
+  const appendAudit = vi.fn(async () => undefined);
+  const oauthClientManager = {
+    listManagedClients: vi.fn(async () => [
+      {
+        key: "chatgpt-read",
+        label: "ChatGPT 只读",
+        provider: "ChatGPT" as const,
+        profile: "read" as const,
+        clientId: "chatgpt-weknora-read",
+        mcpUrl: "https://wek.uov.me/mcp",
+        scope: "weknora:read",
+        issuer: "https://wek.uov.me/oauth/realms/weknora",
+        authorizationEndpoint:
+          "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
+        tokenEndpoint:
+          "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token",
+        enabled: true,
+        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+        sessionCount: 1,
+      },
+    ]),
+    updateManagedClient: vi.fn(async (_key, update) => ({
+      key: "chatgpt-read",
+      label: "ChatGPT 只读",
+      provider: "ChatGPT" as const,
+      profile: "read" as const,
+      clientId: "chatgpt-weknora-read",
+      mcpUrl: "https://wek.uov.me/mcp",
+      scope: "weknora:read",
+      issuer: "https://wek.uov.me/oauth/realms/weknora",
+      authorizationEndpoint:
+        "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
+      tokenEndpoint:
+        "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token",
+      enabled: update.enabled ?? true,
+      redirectUri:
+        update.redirectUri ??
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+      sessionCount: 1,
+    })),
+    rotateManagedClientSecret: vi.fn(async () => ({
+      secret: "new-one-time-secret",
+      oldSecretInvalidated: true,
+    })),
+    revokeManagedClientSessions: vi.fn(async () => ({ revokedSessions: 1 })),
+  };
   const app = buildConsoleApp({
     publicUrl: new URL("https://wek.uov.me/mcp-console/"),
     oidc: {
@@ -41,10 +87,12 @@ function createFixture() {
     policyStore: {
       read: async () => policy,
       write,
+      appendAudit,
       readAudit: async () => [
         { timestamp: "2026-08-31T15:00:00.000Z", actor: "aodo", action: "updated" },
       ],
     },
+    oauthClientManager,
     weknora: {
       listKnowledgeBases: async () => [
         {
@@ -69,7 +117,7 @@ function createFixture() {
     indexHtml: "<!doctype html><title>MCP Console</title>",
     logLevel: "silent",
   });
-  return { app, write };
+  return { app, write, appendAudit, oauthClientManager };
 }
 
 async function login(app: ReturnType<typeof buildConsoleApp>) {
@@ -247,6 +295,68 @@ describe("MCP console HTTP app", () => {
     expect(rejected.statusCode).toBe(403);
     expect(accepted.statusCode).toBe(204);
     expect(String(accepted.headers["set-cookie"])).toContain("Max-Age=0");
+    await app.close();
+  });
+
+  it("manages allow-listed OAuth clients with CSRF and audit records", async () => {
+    const { app, appendAudit, oauthClientManager } = createFixture();
+    const cookie = await login(app);
+    const session = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/session",
+      headers: { cookie },
+    });
+    const csrf = session.json().csrfToken as string;
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/oauth-clients",
+      headers: { cookie },
+    });
+    const rejected = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read",
+      headers: { cookie },
+      payload: { enabled: false },
+    });
+    const updated = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read",
+      headers: { cookie, "x-csrf-token": csrf },
+      payload: {
+        enabled: false,
+        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+      },
+    });
+    appendAudit.mockRejectedValueOnce(new Error("audit unavailable"));
+    const rotated = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/rotate-secret",
+      headers: { cookie, "x-csrf-token": csrf },
+    });
+    const revoked = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/revoke-sessions",
+      headers: { cookie, "x-csrf-token": csrf },
+    });
+
+    expect(list.statusCode).toBe(200);
+    expect(JSON.stringify(list.json())).not.toContain("new-one-time-secret");
+    expect(rejected.statusCode).toBe(403);
+    expect(updated.statusCode).toBe(200);
+    expect(rotated.json()).toEqual({
+      secret: "new-one-time-secret",
+      oldSecretInvalidated: true,
+    });
+    expect(revoked.json()).toEqual({ revokedSessions: 1 });
+    expect(oauthClientManager.updateManagedClient).toHaveBeenCalledWith(
+      "chatgpt-read",
+      {
+        enabled: false,
+        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+      },
+    );
+    expect(appendAudit).toHaveBeenCalledTimes(3);
     await app.close();
   });
 });

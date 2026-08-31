@@ -9,6 +9,11 @@
 
 The two connections are separate MCP resources. Add one or both in each client. Do not put admin credentials into the read-only connection.
 
+The admin connection uses a tenant-wide full-access WeKnora key. It can read all
+knowledge bases and invoke the reviewed create, update, upload, and delete
+tools. The read connection remains constrained by the allow-list managed at
+`https://wek.uov.me/mcp-console/`.
+
 OAuth issuer for both profiles:
 
 ```text
@@ -16,6 +21,11 @@ https://wek.uov.me/oauth/realms/weknora
 ```
 
 The gateway uses static confidential OAuth clients. Anonymous Dynamic Client Registration is disabled.
+
+The management console shows the MCP URL, issuer, authorization/token
+endpoints, client ID, scope, required role, exact callback URL, enabled state,
+and active session count for the four ChatGPT/Claude clients. Existing client
+secrets are not readable; rotate a secret to receive its replacement once.
 
 ## Keycloak preparation
 

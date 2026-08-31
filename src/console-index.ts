@@ -5,6 +5,7 @@ import { buildConsoleApp } from "./console-app.js";
 import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
 import { FileKnowledgePolicyStore } from "./knowledge-policy.js";
+import { KeycloakAdminClient } from "./keycloak-admin.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
 async function readSecret(path: string, name: string): Promise<string> {
@@ -24,9 +25,21 @@ async function healthStatus(url: URL): Promise<"healthy" | "unavailable"> {
 
 async function main(): Promise<void> {
   const config = parseConsoleConfig(process.env);
-  const [clientSecret, sessionSecret, weknoraApiKey, indexHtml, appCss, appJs] =
+  const [
+    clientSecret,
+    keycloakServiceClientSecret,
+    sessionSecret,
+    weknoraApiKey,
+    indexHtml,
+    appCss,
+    appJs,
+  ] =
     await Promise.all([
       readSecret(config.clientSecretFile, "OAuth client secret"),
+      readSecret(
+        config.keycloakServiceClientSecretFile,
+        "Keycloak service client secret",
+      ),
       readSecret(config.sessionSecretFile, "Session secret"),
       readSecret(config.weknoraApiKeyFile, "WeKnora API key"),
       readFile(resolve("console/index.html"), "utf8"),
@@ -57,11 +70,19 @@ async function main(): Promise<void> {
     baseUrl: config.weknoraApiUrl,
     apiKey: weknoraApiKey,
   });
+  const oauthClientManager = new KeycloakAdminClient({
+    adminBaseUrl: config.keycloakAdminUrl,
+    tokenUrl: config.tokenUrl,
+    publicIssuer: issuer,
+    serviceClientId: config.keycloakServiceClientId,
+    serviceClientSecret: keycloakServiceClientSecret,
+  });
   const app = buildConsoleApp({
     publicUrl: config.publicUrl,
     oidc,
     sessions,
     policyStore,
+    oauthClientManager,
     weknora,
     checkServices: async () => ({
       readGateway: await healthStatus(config.readGatewayHealthUrl),

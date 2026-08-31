@@ -51,6 +51,14 @@ export interface KnowledgePolicyUpdate {
   knowledgeBases: KnowledgeBaseChoice[];
 }
 
+export interface ConsoleAuditWriter {
+  appendAudit(
+    action: string,
+    actor: KnowledgePolicyActor,
+    details: Record<string, unknown>,
+  ): Promise<void>;
+}
+
 export class KnowledgePolicyError extends Error {
   constructor(message: string) {
     super(message);
@@ -141,17 +149,41 @@ export class FileKnowledgePolicyStore implements KnowledgePolicyProvider {
       mode: 0o640,
     });
     await rename(temporaryFile, this.policyFile);
-    await appendFile(
-      this.auditFile,
-      `${JSON.stringify({
-        timestamp,
-        action: "knowledge_policy.updated",
-        actor,
-        policy,
-      })}\n`,
-      { encoding: "utf8", mode: 0o640 },
-    );
+    await this.appendAuditRecord({
+      timestamp,
+      action: "knowledge_policy.updated",
+      actor,
+      policy,
+    });
     return policy;
+  }
+
+  async appendAudit(
+    action: string,
+    actor: KnowledgePolicyActor,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    const pending = this.writeTail.then(() =>
+      this.appendAuditRecord({
+        timestamp: this.now().toISOString(),
+        action,
+        actor,
+        details,
+      }),
+    );
+    this.writeTail = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
+  }
+
+  private async appendAuditRecord(record: Record<string, unknown>): Promise<void> {
+    await mkdir(dirname(this.auditFile), { recursive: true, mode: 0o750 });
+    await appendFile(this.auditFile, `${JSON.stringify(record)}\n`, {
+      encoding: "utf8",
+      mode: 0o640,
+    });
   }
 
   async readAudit(limit: number): Promise<unknown[]> {

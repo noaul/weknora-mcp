@@ -52,6 +52,7 @@ the following root-managed files with group `weknora-policy` and mode `0640`:
 - `/etc/weknora-mcp-console/oauth-client-secret`
 - `/etc/weknora-mcp-console/session-secret`
 - `/etc/weknora-mcp-console/weknora-api-key`
+- `/etc/weknora-mcp-console/keycloak-admin-client-secret`
 
 Set the matching `MCP_CONSOLE_CLIENT_SECRET` in the Keycloak environment and
 run `configure-keycloak.sh`. The exact callback is:
@@ -67,6 +68,18 @@ the service's `IPAddressDeny=any` systemd network sandbox.
 The console has a dedicated `weknora:console` client scope and
 `weknora-mcp-console` audience. It does not receive the `weknora:admin` scope or
 the `/mcp-admin` audience.
+
+OAuth client management uses a second confidential service client,
+`weknora-mcp-console-admin`. Its secret remains server-side. The service account
+has the `view/query/manage-clients` and `view/query/manage-users` roles needed to
+manage the four allow-listed external clients and revoke their sessions; the
+application rejects every other client key.
+
+The console supports enabling/disabling clients, changing one exact HTTPS
+callback URI, revoking active sessions, and rotating secrets. A rotated secret
+is returned to the authenticated browser once and is never written to the audit
+log. Disabling or revoking a client does not invalidate an already issued JWT
+inside the gateways, so allow up to the realm's 10-minute access-token lifetime.
 
 The systemd drop-in in `deploy/systemd/weknora-mcp-access-gateway-policy.conf`
 makes the read gateway run the console release and adds the shared policy group.

@@ -26,6 +26,8 @@ The project runs in two isolated profiles so remote clients such as ChatGPT and 
 - Uses a separate full-access WeKnora key and upstream bearer secret
 - Rejects future upstream tools until the checked-in baseline is updated
 - Restricts `create_knowledge_from_file` to `ADMIN_IMPORT_ROOT`
+- Can read every knowledge base and invoke the reviewed create, update, upload,
+  and delete administration tools
 
 ## MCP management console
 
@@ -38,6 +40,8 @@ Keycloak realm, requires the `weknora-admin` role, and provides:
 - one default knowledge base used when a tool call omits `kb_id`;
 - read/admin gateway health status;
 - append-only policy audit records.
+- ChatGPT and Claude read/admin OAuth client settings, session revocation, and
+  one-time secret rotation results.
 
 The read profile exposes `list_allowed_knowledge_bases` plus the original four
 retrieval tools. Each retrieval tool accepts an optional `kb_id`; the gateway
@@ -47,6 +51,11 @@ The console runs independently on loopback port `18198`. Its state lives under
 `/var/lib/weknora-mcp-console`, and its secrets live under
 `/etc/weknora-mcp-console`. Upgrading the official `WeKnora-frontend` and
 `WeKnora-app` images does not touch either path.
+
+Existing OAuth client secrets are never returned to the browser. Rotating a
+secret generates a replacement, invalidates the old rotated secret, and shows
+the new value once. Disabling a client prevents new logins; already issued JWTs
+remain valid until their configured 10-minute expiry.
 
 ## Security boundaries
 

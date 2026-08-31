@@ -8,10 +8,15 @@ import type {
 } from "./console-auth.js";
 import { SessionAuthorizationError } from "./console-auth.js";
 import type {
+  ConsoleAuditWriter,
   KnowledgePolicy,
   KnowledgePolicyActor,
   KnowledgePolicyUpdate,
 } from "./knowledge-policy.js";
+import type {
+  KeycloakAdminClient,
+  ManagedOAuthClientUpdate,
+} from "./keycloak-admin.js";
 import type { WeKnoraKnowledgeBase } from "./weknora-api.js";
 
 const SESSION_COOKIE = "weknora_console_session";
@@ -48,6 +53,7 @@ export interface ConsolePolicyStore {
   read(): Promise<KnowledgePolicy>;
   write(update: KnowledgePolicyUpdate, actor: KnowledgePolicyActor): Promise<KnowledgePolicy>;
   readAudit(limit: number): Promise<unknown[]>;
+  appendAudit: ConsoleAuditWriter["appendAudit"];
 }
 
 export interface BuildConsoleAppOptions {
@@ -58,6 +64,13 @@ export interface BuildConsoleAppOptions {
   };
   sessions: ConsoleSessionStore;
   policyStore: ConsolePolicyStore;
+  oauthClientManager: Pick<
+    KeycloakAdminClient,
+    | "listManagedClients"
+    | "updateManagedClient"
+    | "rotateManagedClientSecret"
+    | "revokeManagedClientSessions"
+  >;
   weknora: { listKnowledgeBases(): Promise<WeKnoraKnowledgeBase[]> };
   checkServices(): Promise<Record<string, "healthy" | "unavailable">>;
   indexHtml: string;
@@ -65,6 +78,25 @@ export interface BuildConsoleAppOptions {
   appJs?: string;
   logLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
 }
+
+const oauthClientParamsSchema = z.object({
+  key: z.enum([
+    "chatgpt-read",
+    "chatgpt-admin",
+    "claude-read",
+    "claude-admin",
+  ]),
+});
+
+const oauthClientUpdateSchema = z
+  .strictObject({
+    enabled: z.boolean().optional(),
+    redirectUri: z.string().url().max(2_048).optional(),
+  })
+  .refine(
+    (value) => value.enabled !== undefined || value.redirectUri !== undefined,
+    { message: "OAuth client update must not be empty" },
+  );
 
 function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -124,6 +156,50 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       return undefined;
     }
     return session;
+  }
+
+  async function requireCsrfSession(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<ConsoleSession | undefined> {
+    const session = await requireSession(request, reply);
+    if (!session) return undefined;
+    const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    try {
+      options.sessions.assertCsrf(
+        sessionId,
+        typeof request.headers["x-csrf-token"] === "string"
+          ? request.headers["x-csrf-token"]
+          : undefined,
+      );
+    } catch (error) {
+      if (error instanceof SessionAuthorizationError) {
+        await reply.code(403).send({ error: "csrf_failed" });
+        return undefined;
+      }
+      throw error;
+    }
+    return session;
+  }
+
+  async function recordAudit(
+    request: FastifyRequest,
+    action: string,
+    session: ConsoleSession,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await options.policyStore.appendAudit(
+        action,
+        { subject: session.subject, username: session.username },
+        details,
+      );
+    } catch (error) {
+      request.log.error(
+        { error: error instanceof Error ? error.name : "UnknownError", action },
+        "console audit write failed after operation completed",
+      );
+    }
   }
 
   app.get("/mcp-console/", async (request, reply) => {
@@ -196,22 +272,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   });
 
   app.put("/mcp-console/api/policy", async (request, reply) => {
-    const session = await requireSession(request, reply);
+    const session = await requireCsrfSession(request, reply);
     if (!session) return;
-    const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-    try {
-      options.sessions.assertCsrf(
-        sessionId,
-        typeof request.headers["x-csrf-token"] === "string"
-          ? request.headers["x-csrf-token"]
-          : undefined,
-      );
-    } catch (error) {
-      if (error instanceof SessionAuthorizationError) {
-        return reply.code(403).send({ error: "csrf_failed" });
-      }
-      throw error;
-    }
 
     const parsed = policyUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_policy" });
@@ -233,21 +295,106 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     return { policy };
   });
 
+  app.get("/mcp-console/api/oauth-clients", async (request, reply) => {
+    if (!(await requireSession(request, reply))) return;
+    try {
+      return { clients: await options.oauthClientManager.listManagedClients() };
+    } catch (error) {
+      request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
+      return reply.code(502).send({ error: "oauth_client_service_unavailable" });
+    }
+  });
+
+  app.put("/mcp-console/api/oauth-clients/:key", async (request, reply) => {
+    const session = await requireCsrfSession(request, reply);
+    if (!session) return;
+    const params = oauthClientParamsSchema.safeParse(request.params);
+    const update = oauthClientUpdateSchema.safeParse(request.body);
+    if (!params.success || !update.success) {
+      return reply.code(400).send({ error: "invalid_oauth_client_update" });
+    }
+    try {
+      const client = await options.oauthClientManager.updateManagedClient(
+        params.data.key,
+        update.data as ManagedOAuthClientUpdate,
+      );
+      await recordAudit(
+        request,
+        "oauth_client.updated",
+        session,
+        {
+          key: params.data.key,
+          enabled: client.enabled,
+          redirectUri: client.redirectUri,
+        },
+      );
+      return { client };
+    } catch (error) {
+      request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
+      return reply.code(502).send({ error: "oauth_client_update_failed" });
+    }
+  });
+
+  app.post(
+    "/mcp-console/api/oauth-clients/:key/rotate-secret",
+    async (request, reply) => {
+      const session = await requireCsrfSession(request, reply);
+      if (!session) return;
+      const params = oauthClientParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply.code(400).send({ error: "invalid_oauth_client" });
+      }
+      try {
+        const result = await options.oauthClientManager.rotateManagedClientSecret(
+          params.data.key,
+        );
+        await recordAudit(
+          request,
+          "oauth_client.secret_rotated",
+          session,
+          {
+            key: params.data.key,
+            oldSecretInvalidated: result.oldSecretInvalidated,
+          },
+        );
+        return result;
+      } catch (error) {
+        request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
+        return reply.code(502).send({ error: "oauth_client_secret_rotation_failed" });
+      }
+    },
+  );
+
+  app.post(
+    "/mcp-console/api/oauth-clients/:key/revoke-sessions",
+    async (request, reply) => {
+      const session = await requireCsrfSession(request, reply);
+      if (!session) return;
+      const params = oauthClientParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply.code(400).send({ error: "invalid_oauth_client" });
+      }
+      try {
+        const result = await options.oauthClientManager.revokeManagedClientSessions(
+          params.data.key,
+        );
+        await recordAudit(
+          request,
+          "oauth_client.sessions_revoked",
+          session,
+          { key: params.data.key, revokedSessions: result.revokedSessions },
+        );
+        return result;
+      } catch (error) {
+        request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
+        return reply.code(502).send({ error: "oauth_client_session_revocation_failed" });
+      }
+    },
+  );
+
   app.post("/mcp-console/logout", async (request, reply) => {
     const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-    try {
-      options.sessions.assertCsrf(
-        sessionId,
-        typeof request.headers["x-csrf-token"] === "string"
-          ? request.headers["x-csrf-token"]
-          : undefined,
-      );
-    } catch (error) {
-      if (error instanceof SessionAuthorizationError) {
-        return reply.code(403).send({ error: "csrf_failed" });
-      }
-      throw error;
-    }
+    if (!(await requireCsrfSession(request, reply))) return;
     options.sessions.delete(sessionId);
     return reply.header("Set-Cookie", sessionCookie("", 0)).code(204).send();
   });

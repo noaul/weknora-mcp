@@ -21,6 +21,9 @@ describe("console deployment assets", () => {
       "OAUTH_TOKEN_URL=http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/token",
     );
     expect(env).toContain("FALLBACK_KB_ID=");
+    expect(env).toContain(
+      "KEYCLOAK_SERVICE_CLIENT_SECRET_FILE=/etc/weknora-mcp-console/keycloak-admin-client-secret",
+    );
   });
 
   it("publishes only the sidecar path and creates a static Keycloak client", async () => {
@@ -43,6 +46,15 @@ describe("console deployment assets", () => {
       /configure_optional_client MCP-console[\s\S]*\$console_scope_id[\s\S]*weknora-admin/,
     );
     expect(keycloak).toContain("MCP_CONSOLE_CLIENT_SECRET");
+    expect(keycloak).toContain("MCP_CONSOLE_ADMIN_CLIENT_SECRET");
+    expect(keycloak).toContain("weknora-mcp-console-admin");
+    expect(keycloak).toContain("manage-clients");
+    expect(keycloak).toContain("manage-users");
+    expect(keycloak).toContain("local created=false");
+    expect(keycloak).toContain('if [[ "$created" == true ]]');
+    expect(keycloak).toContain(
+      'clients/$id/scope-mappings/clients/$realm_management_id',
+    );
     expect(keycloakEnv).toContain(
       "MCP_CONSOLE_REDIRECT_URI=https://wek.uov.me/mcp-console/oauth/callback",
     );
@@ -59,6 +71,10 @@ describe("console deployment assets", () => {
     expect(installer).toContain("/var/lib/weknora-mcp-console");
     expect(installer).toContain("/etc/weknora-mcp-console");
     expect(installer).toContain("install -o root -g root -m 0600");
+    expect(installer).toContain("ensure_env_setting KEYCLOAK_ADMIN_URL");
+    expect(installer).toContain(
+      "ensure_env_setting KEYCLOAK_SERVICE_CLIENT_SECRET_FILE",
+    );
     expect(installer).not.toMatch(/\/opt\/weknora(?:\/|\s)/);
     expect(installer).not.toMatch(/WeKnora-frontend|WeKnora-app/);
     expect(override).toContain("SupplementaryGroups=weknora-policy");
