@@ -1,3 +1,5 @@
+name: weknora-mcp-auth
+
 services:
   postgres:
     image: postgres:17-alpine

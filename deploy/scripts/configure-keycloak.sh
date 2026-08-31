@@ -4,7 +4,7 @@ set -euo pipefail
 : "${KEYCLOAK_ADMIN_USERNAME:?required}"
 : "${KEYCLOAK_ADMIN_PASSWORD:?required}"
 
-container="${KEYCLOAK_CONTAINER:-weknora-keycloak-1}"
+container="${KEYCLOAK_CONTAINER:-weknora-mcp-auth-keycloak-1}"
 kcadm=(docker exec "$container" /opt/keycloak/bin/kcadm.sh)
 
 "${kcadm[@]}" config credentials \
