@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
+import { retry } from "./retry.js";
 import { OfficialWeKnoraMcpClient } from "./upstream-client.js";
 
 async function main(): Promise<void> {
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
     token: upstreamToken,
     timeoutMs: config.upstreamTimeoutMs,
   });
-  await upstream.connect();
+  await retry(() => upstream.connect(), { attempts: 12, delayMs: 1_000 });
 
   const verifyToken = createRemoteJwtAccessTokenVerifier({
     issuer: config.oauthIssuer.toString().replace(/\/$/, ""),
