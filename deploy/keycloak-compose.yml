@@ -12,7 +12,7 @@ services:
       - keycloak-postgres:/var/lib/postgresql/data
     networks:
       keycloak-private:
-        ipv4_address: 172.31.250.2
+        ipv4_address: 10.254.250.2
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
       interval: 10s
@@ -39,14 +39,14 @@ services:
       KC_HTTP_RELATIVE_PATH: /oauth
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
-      KC_PROXY_TRUSTED_ADDRESSES: 172.31.250.1/32
+      KC_PROXY_TRUSTED_ADDRESSES: 10.254.250.1/32
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "false"
     ports:
       - "127.0.0.1:18195:8080"
     networks:
       keycloak-private:
-        ipv4_address: 172.31.250.3
+        ipv4_address: 10.254.250.3
     security_opt:
       - no-new-privileges:true
 
@@ -55,7 +55,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.31.250.0/28
+        - subnet: 10.254.250.0/28
 
 volumes:
   keycloak-postgres:
