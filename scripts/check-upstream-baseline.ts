@@ -12,8 +12,12 @@ async function main(): Promise<void> {
   }
 
   const token = (await readFile(tokenFile, "utf8")).trim();
+  const adminMode = process.env.GATEWAY_MODE === "admin";
+  const baselineFile = adminMode
+    ? "fixtures/upstream-admin-tools-baseline.json"
+    : "fixtures/upstream-tools-baseline.json";
   const baseline = JSON.parse(
-    await readFile(resolve("fixtures/upstream-tools-baseline.json"), "utf8"),
+    await readFile(resolve(baselineFile), "utf8"),
   ) as ToolBaseline;
   const client = new OfficialWeKnoraMcpClient({
     url: new URL(url),
@@ -23,7 +27,9 @@ async function main(): Promise<void> {
 
   try {
     const liveTools = await client.listTools();
-    const errors = compareToolBaseline(baseline, liveTools);
+    const errors = compareToolBaseline(baseline, liveTools, {
+      rejectUnexpected: adminMode,
+    });
     if (errors.length > 0) {
       throw new Error(errors.join("\n"));
     }

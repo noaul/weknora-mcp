@@ -1,0 +1,730 @@
+{
+  "server": {
+    "name": "weknora-server",
+    "version": "1.1.1"
+  },
+  "tools": [
+    {
+      "name": "create_tenant",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "business": {
+            "title": "Business",
+            "type": "string"
+          },
+          "retriever_engines": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retriever Engines"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "business"
+        ],
+        "title": "create_tenantArguments"
+      }
+    },
+    {
+      "name": "list_tenants",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "list_tenantsArguments"
+      }
+    },
+    {
+      "name": "create_knowledge_base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "embedding_model_id": {
+            "default": "",
+            "title": "Embedding Model Id",
+            "type": "string"
+          },
+          "summary_model_id": {
+            "default": "",
+            "title": "Summary Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "create_knowledge_baseArguments"
+      }
+    },
+    {
+      "name": "list_knowledge_bases",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "list_knowledge_basesArguments"
+      }
+    },
+    {
+      "name": "list_shared_knowledge_bases",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "list_shared_knowledge_basesArguments"
+      }
+    },
+    {
+      "name": "get_knowledge_base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kb_id"
+        ],
+        "title": "get_knowledge_baseArguments"
+      }
+    },
+    {
+      "name": "delete_knowledge_base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kb_id"
+        ],
+        "title": "delete_knowledge_baseArguments"
+      }
+    },
+    {
+      "name": "hybrid_search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "vector_threshold": {
+            "default": 0.5,
+            "title": "Vector Threshold",
+            "type": "number"
+          },
+          "keyword_threshold": {
+            "default": 0.3,
+            "title": "Keyword Threshold",
+            "type": "number"
+          },
+          "match_count": {
+            "default": 5,
+            "title": "Match Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kb_id",
+          "query"
+        ],
+        "title": "hybrid_searchArguments"
+      }
+    },
+    {
+      "name": "create_knowledge_from_file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "enable_multimodel": {
+            "default": true,
+            "title": "Enable Multimodel",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kb_id",
+          "file_path"
+        ],
+        "title": "create_knowledge_from_fileArguments"
+      }
+    },
+    {
+      "name": "create_knowledge_from_url",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "enable_multimodel": {
+            "default": true,
+            "title": "Enable Multimodel",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kb_id",
+          "url"
+        ],
+        "title": "create_knowledge_from_urlArguments"
+      }
+    },
+    {
+      "name": "create_knowledge_from_text",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "tag_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tag Ids"
+          },
+          "status": {
+            "default": "publish",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kb_id",
+          "title",
+          "content"
+        ],
+        "title": "create_knowledge_from_textArguments"
+      }
+    },
+    {
+      "name": "list_knowledge",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kb_id"
+        ],
+        "title": "list_knowledgeArguments"
+      }
+    },
+    {
+      "name": "get_knowledge",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledge_id": {
+            "title": "Knowledge Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id"
+        ],
+        "title": "get_knowledgeArguments"
+      }
+    },
+    {
+      "name": "delete_knowledge",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledge_id": {
+            "title": "Knowledge Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id"
+        ],
+        "title": "delete_knowledgeArguments"
+      }
+    },
+    {
+      "name": "create_model",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "source": {
+            "default": "local",
+            "title": "Source",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "description"
+        ],
+        "title": "create_modelArguments"
+      }
+    },
+    {
+      "name": "list_models",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "list_modelsArguments"
+      }
+    },
+    {
+      "name": "get_model",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "get_modelArguments"
+      }
+    },
+    {
+      "name": "create_session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "max_rounds": {
+            "default": 5,
+            "title": "Max Rounds",
+            "type": "integer"
+          },
+          "enable_rewrite": {
+            "default": true,
+            "title": "Enable Rewrite",
+            "type": "boolean"
+          },
+          "fallback_response": {
+            "default": "Sorry, I cannot answer this question.",
+            "title": "Fallback Response",
+            "type": "string"
+          },
+          "summary_model_id": {
+            "default": "",
+            "title": "Summary Model Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kb_id"
+        ],
+        "title": "create_sessionArguments"
+      }
+    },
+    {
+      "name": "get_session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "get_sessionArguments"
+      }
+    },
+    {
+      "name": "list_sessions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "title": "list_sessionsArguments"
+      }
+    },
+    {
+      "name": "delete_session",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "delete_sessionArguments"
+      }
+    },
+    {
+      "name": "chat",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "knowledge_base_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Knowledge Base Ids"
+          },
+          "web_search_enabled": {
+            "default": false,
+            "title": "Web Search Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id",
+          "query"
+        ],
+        "title": "chatArguments"
+      }
+    },
+    {
+      "name": "agent_chat",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "knowledge_base_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Knowledge Base Ids"
+          },
+          "web_search_enabled": {
+            "default": false,
+            "title": "Web Search Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id",
+          "query",
+          "agent_id"
+        ],
+        "title": "agent_chatArguments"
+      }
+    },
+    {
+      "name": "list_agents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 50,
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "title": "list_agentsArguments"
+      }
+    },
+    {
+      "name": "get_agent",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "get_agentArguments"
+      }
+    },
+    {
+      "name": "list_chunks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledge_id": {
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "knowledge_id"
+        ],
+        "title": "list_chunksArguments"
+      }
+    },
+    {
+      "name": "delete_chunk",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "knowledge_id": {
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id",
+          "chunk_id"
+        ],
+        "title": "delete_chunkArguments"
+      }
+    },
+    {
+      "name": "wiki_search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kb_id",
+          "query"
+        ],
+        "title": "wiki_searchArguments"
+      }
+    },
+    {
+      "name": "wiki_read_page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kb_id",
+          "slug"
+        ],
+        "title": "wiki_read_pageArguments"
+      }
+    },
+    {
+      "name": "wiki_index_view",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kb_id"
+        ],
+        "title": "wiki_index_viewArguments"
+      }
+    }
+  ]
+}

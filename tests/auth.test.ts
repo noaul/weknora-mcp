@@ -1,4 +1,10 @@
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import {
+  exportJWK,
+  generateKeyPair,
+  SignJWT,
+  type JWK,
+  type JWSHeaderParameters,
+} from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +17,12 @@ const issuer = "https://wek.uov.me/oauth/realms/weknora";
 const audience = "https://wek.uov.me/mcp";
 let privateKey: CryptoKey;
 let verifier: ReturnType<typeof createJwtAccessTokenVerifier>;
+let publicJwk: JWK;
+
+async function verifierJwks(header: JWSHeaderParameters): Promise<JWK> {
+  if (header.kid !== "test-key") throw new Error("unknown kid");
+  return { ...publicJwk, kid: "test-key", alg: "RS256" };
+}
 
 async function token(
   overrides: Record<string, unknown> = {},
@@ -35,15 +47,12 @@ async function token(
 beforeAll(async () => {
   const pair = await generateKeyPair("RS256");
   privateKey = pair.privateKey;
-  const jwk = await exportJWK(pair.publicKey);
+  publicJwk = await exportJWK(pair.publicKey);
   verifier = createJwtAccessTokenVerifier({
     issuer,
     audience,
     requiredScope: "weknora:read",
-    jwks: async (header) => {
-      if (header.kid !== "test-key") throw new Error("unknown kid");
-      return { ...jwk, kid: "test-key", alg: "RS256" };
-    },
+    jwks: verifierJwks,
   });
 });
 
@@ -81,5 +90,33 @@ describe("JWT access-token verification", () => {
     await expect(
       verifier(await token({}, { kid: "unknown" })),
     ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
+  it("requires the configured realm role for admin tokens", async () => {
+    const adminVerifier = createJwtAccessTokenVerifier({
+      issuer,
+      audience: "https://wek.uov.me/mcp-admin",
+      requiredScope: "weknora:admin",
+      requiredRole: "weknora-admin",
+      jwks: verifierJwks,
+    });
+
+    await expect(
+      adminVerifier(
+        await token({
+          aud: "https://wek.uov.me/mcp-admin",
+          scope: "openid weknora:admin",
+          realm_access: { roles: ["weknora-admin"] },
+        }),
+      ),
+    ).resolves.toMatchObject({ subject: "user-1" });
+    await expect(
+      adminVerifier(
+        await token({
+          aud: "https://wek.uov.me/mcp-admin",
+          scope: "openid weknora:admin",
+        }),
+      ),
+    ).rejects.toBeInstanceOf(AuthorizationError);
   });
 });

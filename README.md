@@ -1,8 +1,8 @@
 # WeKnora MCP Access Gateway
 
-OAuth-protected, read-only MCP gateway for the official Tencent WeKnora MCP server.
+OAuth-protected read-only and full-administration gateways for the official Tencent WeKnora MCP server.
 
-The gateway is designed for remote clients such as ChatGPT and Claude. It exposes a deliberately small MCP surface and never sends the WeKnora API key or upstream MCP shared secret to clients.
+The project runs in two isolated profiles so remote clients such as ChatGPT and Claude can choose the permission level without sharing credentials or audiences.
 
 ## Version 1 policy
 
@@ -17,13 +17,24 @@ The gateway is designed for remote clients such as ChatGPT and Claude. It expose
 - No client-controlled knowledge-base parameter
 - No write, delete, upload, chat, agent, resource, or prompt capability
 
+## Admin policy
+
+- MCP URL: `https://wek.uov.me/mcp-admin`
+- Required scope: `weknora:admin`
+- Required Keycloak realm role: `weknora-admin`
+- Exposes the reviewed 30-tool baseline from `tencent-weknora-mcp==1.1.1`
+- Uses a separate full-access WeKnora key and upstream bearer secret
+- Rejects future upstream tools until the checked-in baseline is updated
+- Restricts `create_knowledge_from_file` to `ADMIN_IMPORT_ROOT`
+
 ## Security boundaries
 
-1. The gateway registers only four read tools and injects the fixed KB ID.
-2. A dedicated official WeKnora MCP instance uses a retrieve-only API key scoped to the same KB.
-3. OAuth access tokens are verified for signature, issuer, audience, expiry, and scope.
-4. Client Authorization headers are replaced before upstream calls.
-5. Raw WeKnora and MCP ports remain bound to loopback or a private bridge.
+1. Read and admin profiles use separate resource URLs, scopes, clients, processes, upstream secrets, and WeKnora keys.
+2. The read gateway registers only four tools and injects the fixed KB ID.
+3. The admin gateway exposes only the exact reviewed upstream baseline and additionally requires a realm role.
+4. OAuth access tokens are verified for signature, issuer, audience, expiry, scope, and the configured role.
+5. Client Authorization headers are replaced before upstream calls.
+6. Raw WeKnora and MCP ports remain bound to loopback or a private bridge.
 
 ## Development
 

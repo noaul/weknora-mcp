@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { parseConfig } from "../src/config.js";
@@ -20,17 +22,56 @@ const validEnv = {
   UPSTREAM_TIMEOUT_MS: "30000",
   LOG_LEVEL: "info",
 };
+const adminImportRoot = resolve("weknora-import");
 
 describe("parseConfig", () => {
   it("parses the production configuration", () => {
     const config = parseConfig(validEnv);
 
+    expect(config.gatewayMode).toBe("readonly");
     expect(config.publicMcpUrl.href).toBe("https://wek.uov.me/mcp");
     expect(config.allowedOrigins).toEqual([
       "https://chatgpt.com",
       "https://claude.ai",
     ]);
     expect(config.port).toBe(18194);
+  });
+
+  it("parses an admin profile with an absolute import root", () => {
+    const config = parseConfig({
+      ...validEnv,
+      GATEWAY_MODE: "admin",
+      PORT: "18197",
+      PUBLIC_MCP_URL: "https://wek.uov.me/mcp-admin",
+      OAUTH_REQUIRED_SCOPE: "weknora:admin",
+      OAUTH_REQUIRED_ROLE: "weknora-admin",
+      UPSTREAM_MCP_URL: "http://127.0.0.1:18196/mcp",
+      ADMIN_IMPORT_ROOT: adminImportRoot,
+    });
+
+    expect(config.gatewayMode).toBe("admin");
+    expect(config.adminImportRoot).toBe(adminImportRoot);
+    expect(config.oauthRequiredRole).toBe("weknora-admin");
+  });
+
+  it("requires an absolute import root in admin mode", () => {
+    expect(() =>
+      parseConfig({
+        ...validEnv,
+        GATEWAY_MODE: "admin",
+        ADMIN_IMPORT_ROOT: "relative/imports",
+      }),
+    ).toThrow(/ADMIN_IMPORT_ROOT.*absolute/i);
+  });
+
+  it("requires an explicit realm role in admin mode", () => {
+    expect(() =>
+      parseConfig({
+        ...validEnv,
+        GATEWAY_MODE: "admin",
+        ADMIN_IMPORT_ROOT: adminImportRoot,
+      }),
+    ).toThrow(/OAUTH_REQUIRED_ROLE.*admin/i);
   });
 
   it("rejects a non-HTTPS public MCP URL", () => {

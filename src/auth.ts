@@ -3,6 +3,7 @@ import {
   importJWK,
   jwtVerify,
   type JWK,
+  type JWTPayload,
   type JWSHeaderParameters,
 } from "jose";
 
@@ -36,7 +37,23 @@ export interface JwtVerifierOptions {
   issuer: string;
   audience: string;
   requiredScope: string;
+  requiredRole?: string;
   jwks: (header: JWSHeaderParameters) => Promise<JWK>;
+}
+
+function assertRequiredRole(payload: JWTPayload, requiredRole?: string): void {
+  if (!requiredRole) return;
+  const realmAccess = payload.realm_access;
+  const roles =
+    realmAccess && typeof realmAccess === "object"
+      ? (realmAccess as Record<string, unknown>).roles
+      : undefined;
+  if (
+    !Array.isArray(roles) ||
+    !roles.some((role) => typeof role === "string" && role === requiredRole)
+  ) {
+    throw new AuthorizationError("Required realm role is missing");
+  }
 }
 
 export function createJwtAccessTokenVerifier(options: JwtVerifierOptions) {
@@ -57,6 +74,7 @@ export function createJwtAccessTokenVerifier(options: JwtVerifierOptions) {
       if (!scopes.includes(options.requiredScope)) {
         throw new AuthorizationError();
       }
+      assertRequiredRole(result.payload, options.requiredRole);
 
       const clientIdClaim = result.payload.azp ?? result.payload.client_id;
       const principal: AuthenticatedPrincipal = { subject, scopes };
@@ -75,6 +93,7 @@ export function createRemoteJwtAccessTokenVerifier(options: {
   issuer: string;
   audience: string;
   requiredScope: string;
+  requiredRole?: string;
   jwksUrl: URL;
 }) {
   const remoteJwks = createRemoteJWKSet(options.jwksUrl, {
@@ -95,6 +114,7 @@ export function createRemoteJwtAccessTokenVerifier(options: {
         .split(/\s+/)
         .filter(Boolean);
       if (!scopes.includes(options.requiredScope)) throw new AuthorizationError();
+      assertRequiredRole(result.payload, options.requiredRole);
       const clientIdClaim = result.payload.azp ?? result.payload.client_id;
       const principal: AuthenticatedPrincipal = { subject, scopes };
       if (typeof clientIdClaim === "string") principal.clientId = clientIdClaim;

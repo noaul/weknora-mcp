@@ -56,4 +56,27 @@ describe("tool baseline comparison", () => {
       ]),
     ).toContain("Input schema changed for upstream tool: hybrid_search");
   });
+
+  it("can reject tools that are not in an exact admin baseline", () => {
+    expect(
+      compareToolBaseline(
+        baseline,
+        [
+          {
+            name: "hybrid_search",
+            inputSchema: baseline.tools[0]!.inputSchema as {
+              type: "object";
+              properties?: Record<string, object>;
+              required?: string[];
+            },
+          },
+          {
+            name: "future_admin_tool",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+        { rejectUnexpected: true },
+      ),
+    ).toEqual(["Unexpected upstream tool: future_admin_tool"]);
+  });
 });

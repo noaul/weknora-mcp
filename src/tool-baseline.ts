@@ -9,6 +9,10 @@ export interface ToolBaseline {
   tools: BaselineTool[];
 }
 
+export interface CompareToolBaselineOptions {
+  rejectUnexpected?: boolean;
+}
+
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
   if (!value || typeof value !== "object") return value;
@@ -33,6 +37,7 @@ function stable(value: unknown): string {
 export function compareToolBaseline(
   baseline: ToolBaseline,
   liveTools: Tool[],
+  options: CompareToolBaselineOptions = {},
 ): string[] {
   const liveByName = new Map(liveTools.map((tool) => [tool.name, tool]));
   const errors: string[] = [];
@@ -45,6 +50,15 @@ export function compareToolBaseline(
     }
     if (stable(expected.inputSchema) !== stable(actual.inputSchema)) {
       errors.push(`Input schema changed for upstream tool: ${expected.name}`);
+    }
+  }
+
+  if (options.rejectUnexpected) {
+    const expectedNames = new Set(baseline.tools.map((tool) => tool.name));
+    for (const actual of liveTools) {
+      if (!expectedNames.has(actual.name)) {
+        errors.push(`Unexpected upstream tool: ${actual.name}`);
+      }
     }
   }
 

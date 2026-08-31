@@ -4,7 +4,9 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
+import { createAdminGatewayMcpServer } from "./admin-gateway-server.js";
 import {
   AuthenticationError,
   AuthorizationError,
@@ -23,6 +25,7 @@ export interface BuildAppOptions {
   config: GatewayConfig;
   verifyToken: (token: string) => Promise<AuthenticatedPrincipal>;
   upstream: ToolCaller;
+  adminTools?: Tool[];
 }
 
 function bearerToken(header: string | undefined): string | undefined {
@@ -41,7 +44,11 @@ function toolName(body: unknown): string | undefined {
 }
 
 export function buildApp(options: BuildAppOptions) {
+  if (options.config.gatewayMode === "admin" && !options.adminTools) {
+    throw new Error("adminTools are required in admin mode");
+  }
   const app = Fastify({
+    bodyLimit: options.config.httpBodyLimitBytes,
     trustProxy: (address) => address === "127.0.0.1" || address === "::1",
     logger: {
       level: options.config.logLevel,
@@ -73,10 +80,12 @@ export function buildApp(options: BuildAppOptions) {
     issuer: options.config.oauthIssuer.toString(),
     scope: options.config.oauthRequiredScope,
   });
+  const mcpPath = options.config.publicMcpUrl.pathname;
+  const resourceMetadataPath = `/.well-known/oauth-protected-resource${mcpPath}`;
 
   for (const path of [
     "/.well-known/oauth-protected-resource",
-    "/.well-known/oauth-protected-resource/mcp",
+    resourceMetadataPath,
   ]) {
     app.get(path, async (_request, reply) => reply.send(metadata));
   }
@@ -146,7 +155,7 @@ export function buildApp(options: BuildAppOptions) {
     }
   }
 
-  app.options("/mcp", async (request, reply) => {
+  app.options(mcpPath, async (request, reply) => {
     const origin = request.headers.origin;
     if (!origin || !options.config.allowedOrigins.includes(origin)) {
       return reply.code(403).send({ error: "origin_not_allowed" });
@@ -159,17 +168,17 @@ export function buildApp(options: BuildAppOptions) {
       .send();
   });
 
-  app.get("/mcp", async (request, reply) => {
+  app.get(mcpPath, async (request, reply) => {
     if (!(await authorize(request, reply))) return;
     return reply.header("Allow", "POST").code(405).send({ error: "method_not_allowed" });
   });
 
-  app.delete("/mcp", async (request, reply) => {
+  app.delete(mcpPath, async (request, reply) => {
     if (!(await authorize(request, reply))) return;
     return reply.header("Allow", "POST").code(405).send({ error: "method_not_allowed" });
   });
 
-  app.post("/mcp", async (request, reply) => {
+  app.post(mcpPath, async (request, reply) => {
     const principal = await authorize(request, reply);
     if (!principal) return;
 
@@ -178,11 +187,18 @@ export function buildApp(options: BuildAppOptions) {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
-    const server = createGatewayMcpServer({
-      fixedKbId: options.config.fixedKbId,
-      fixedKbName: options.config.fixedKbName,
-      upstream: options.upstream,
-    });
+    const server =
+      options.config.gatewayMode === "admin"
+        ? createAdminGatewayMcpServer({
+            tools: options.adminTools ?? [],
+            importRoot: options.config.adminImportRoot ?? "",
+            upstream: options.upstream,
+          })
+        : createGatewayMcpServer({
+            fixedKbId: options.config.fixedKbId,
+            fixedKbName: options.config.fixedKbName,
+            upstream: options.upstream,
+          });
 
     reply.hijack();
     reply.raw.on("close", () => {

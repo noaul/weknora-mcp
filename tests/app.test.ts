@@ -10,6 +10,7 @@ import { buildApp } from "../src/app.js";
 import type { GatewayConfig } from "../src/config.js";
 
 const config: GatewayConfig = {
+  gatewayMode: "readonly",
   host: "127.0.0.1",
   port: 18194,
   publicMcpUrl: new URL("https://wek.uov.me/mcp"),
@@ -26,6 +27,7 @@ const config: GatewayConfig = {
   rateLimitIpPerMinute: 120,
   rateLimitSubjectPerMinute: 60,
   upstreamTimeoutMs: 30_000,
+  httpBodyLimitBytes: 1_048_576,
   logLevel: "silent",
 };
 
