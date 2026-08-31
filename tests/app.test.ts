@@ -23,6 +23,8 @@ const config: GatewayConfig = {
   upstreamMcpTokenFile: "/run/secrets/token",
   fixedKbId: "51adf856-2722-4a62-be49-b7d1f2cd20b4",
   fixedKbName: "镍基合金",
+  knowledgePolicyFile: "/var/lib/weknora-mcp-console/knowledge-policy.json",
+  knowledgeAuditFile: "/var/lib/weknora-mcp-console/audit.ndjson",
   allowedOrigins: ["https://chatgpt.com", "https://claude.ai"],
   rateLimitIpPerMinute: 120,
   rateLimitSubjectPerMinute: 60,
@@ -166,7 +168,7 @@ describe("HTTP application", () => {
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toHaveLength(4);
+      expect(tools.tools.map((tool) => tool.name)).toHaveLength(5);
 
       const result = await client.callTool({
         name: "hybrid_search",

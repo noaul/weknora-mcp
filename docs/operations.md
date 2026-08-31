@@ -11,6 +11,7 @@
 | `18195` | Keycloak | loopback, selected `/oauth` routes published |
 | `18196` | Full-access official MCP upstream | loopback |
 | `18197` | Admin OAuth gateway | loopback, published as `/mcp-admin` |
+| `18198` | MCP management console | loopback, published as `/mcp-console/` |
 
 ## Secrets
 
@@ -21,6 +22,8 @@ Generate independent random values for the Keycloak database/admin credentials, 
 - Admin upstream environment: `/etc/weknora-mcp-admin-upstream.env`
 - Admin gateway environment/token: `/etc/weknora-mcp-admin-gateway/`
 - Keycloak environment: `/opt/weknora-mcp-access-gateway/deploy/keycloak.env`
+- Console environment/secrets: `/etc/weknora-mcp-console/`
+- Console policy/audit state: `/var/lib/weknora-mcp-console/`
 
 Environment files are root-owned mode `0600`. Upstream token files may be `0640` for the matching gateway group. Never commit real keys.
 
@@ -40,6 +43,35 @@ Files staged under `/var/lib/weknora-mcp-import` should be owned by `root:weknor
 8. Enable and start the admin upstream and gateway.
 9. Run `probe.sh`, temporary OAuth smoke tests, and real-client tests.
 
+### Console sidecar
+
+The console can be installed in an independent release directory such as
+`/opt/weknora-mcp-console`. Run `deploy/scripts/install-console.sh`, then create
+the following root-managed files with group `weknora-policy` and mode `0640`:
+
+- `/etc/weknora-mcp-console/oauth-client-secret`
+- `/etc/weknora-mcp-console/session-secret`
+- `/etc/weknora-mcp-console/weknora-api-key`
+
+Set the matching `MCP_CONSOLE_CLIENT_SECRET` in the Keycloak environment and
+run `configure-keycloak.sh`. The exact callback is:
+
+```text
+https://wek.uov.me/mcp-console/oauth/callback
+```
+
+The browser authorization endpoint uses the public issuer. The console exchanges
+the authorization code through loopback port `18195`, which is compatible with
+the service's `IPAddressDeny=any` systemd network sandbox.
+
+The console has a dedicated `weknora:console` client scope and
+`weknora-mcp-console` audience. It does not receive the `weknora:admin` scope or
+the `/mcp-admin` audience.
+
+The systemd drop-in in `deploy/systemd/weknora-mcp-access-gateway-policy.conf`
+makes the read gateway run the console release and adds the shared policy group.
+It does not modify `/opt/weknora` or either official WeKnora container.
+
 ## Routine verification
 
 ```bash
@@ -47,8 +79,10 @@ systemctl status weknora-mcp-gateway --no-pager
 systemctl status weknora-mcp-access-gateway --no-pager
 systemctl status weknora-mcp-admin-upstream --no-pager
 systemctl status weknora-mcp-admin-gateway --no-pager
+systemctl status weknora-mcp-console --no-pager
 curl -fsS http://127.0.0.1:18194/readyz
 curl -fsS http://127.0.0.1:18197/readyz
+curl -fsS http://127.0.0.1:18198/healthz
 ```
 
 Check the reviewed schemas after every official MCP or WeKnora upgrade:

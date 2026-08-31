@@ -27,10 +27,32 @@ The project runs in two isolated profiles so remote clients such as ChatGPT and 
 - Rejects future upstream tools until the checked-in baseline is updated
 - Restricts `create_knowledge_from_file` to `ADMIN_IMPORT_ROOT`
 
+## MCP management console
+
+The optional sidecar console is published at `https://wek.uov.me/mcp-console/`
+without changing the official WeKnora frontend image. It uses the existing
+Keycloak realm, requires the `weknora-admin` role, and provides:
+
+- a live list of WeKnora knowledge bases;
+- a server-side allow-list for the read-only MCP profile;
+- one default knowledge base used when a tool call omits `kb_id`;
+- read/admin gateway health status;
+- append-only policy audit records.
+
+The read profile exposes `list_allowed_knowledge_bases` plus the original four
+retrieval tools. Each retrieval tool accepts an optional `kb_id`; the gateway
+rejects IDs outside the configured allow-list before making an upstream call.
+
+The console runs independently on loopback port `18198`. Its state lives under
+`/var/lib/weknora-mcp-console`, and its secrets live under
+`/etc/weknora-mcp-console`. Upgrading the official `WeKnora-frontend` and
+`WeKnora-app` images does not touch either path.
+
 ## Security boundaries
 
 1. Read and admin profiles use separate resource URLs, scopes, clients, processes, upstream secrets, and WeKnora keys.
-2. The read gateway registers only four tools and injects the fixed KB ID.
+2. The read gateway registers only approved retrieval tools and resolves every
+   requested KB ID against the server-side allow-list.
 3. The admin gateway exposes only the exact reviewed upstream baseline and additionally requires a realm role.
 4. OAuth access tokens are verified for signature, issuer, audience, expiry, scope, and the configured role.
 5. Client Authorization headers are replaced before upstream calls.

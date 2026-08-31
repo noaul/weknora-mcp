@@ -16,6 +16,8 @@ const validEnv = {
   UPSTREAM_MCP_TOKEN_FILE: "/run/secrets/upstream-token",
   FIXED_KB_ID: "51adf856-2722-4a62-be49-b7d1f2cd20b4",
   FIXED_KB_NAME: "镍基合金",
+  KNOWLEDGE_POLICY_FILE: "/var/lib/weknora-mcp-console/knowledge-policy.json",
+  KNOWLEDGE_AUDIT_FILE: "/var/lib/weknora-mcp-console/audit.ndjson",
   ALLOWED_ORIGINS: "https://chatgpt.com,https://claude.ai",
   RATE_LIMIT_IP_PER_MINUTE: "120",
   RATE_LIMIT_SUBJECT_PER_MINUTE: "60",
@@ -35,6 +37,7 @@ describe("parseConfig", () => {
       "https://claude.ai",
     ]);
     expect(config.port).toBe(18194);
+    expect(config.knowledgePolicyFile).toContain("knowledge-policy.json");
   });
 
   it("parses an admin profile with an absolute import root", () => {

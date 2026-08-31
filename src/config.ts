@@ -17,6 +17,14 @@ const envSchema = z.object({
   UPSTREAM_MCP_TOKEN_FILE: z.string().min(1),
   FIXED_KB_ID: uuid,
   FIXED_KB_NAME: z.string().min(1),
+  KNOWLEDGE_POLICY_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/knowledge-policy.json"),
+  KNOWLEDGE_AUDIT_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/audit.ndjson"),
   ADMIN_IMPORT_ROOT: z.string().min(1).optional(),
   ALLOWED_ORIGINS: z.string().default(""),
   RATE_LIMIT_IP_PER_MINUTE: z.coerce.number().int().positive().default(120),
@@ -46,6 +54,8 @@ export interface GatewayConfig {
   upstreamMcpTokenFile: string;
   fixedKbId: string;
   fixedKbName: string;
+  knowledgePolicyFile: string;
+  knowledgeAuditFile: string;
   adminImportRoot?: string;
   allowedOrigins: string[];
   rateLimitIpPerMinute: number;
@@ -116,6 +126,8 @@ export function parseConfig(env: NodeJS.ProcessEnv | Record<string, string>): Ga
     upstreamMcpTokenFile: parsed.data.UPSTREAM_MCP_TOKEN_FILE,
     fixedKbId: parsed.data.FIXED_KB_ID,
     fixedKbName: parsed.data.FIXED_KB_NAME,
+    knowledgePolicyFile: parsed.data.KNOWLEDGE_POLICY_FILE,
+    knowledgeAuditFile: parsed.data.KNOWLEDGE_AUDIT_FILE,
     allowedOrigins: parsed.data.ALLOWED_ORIGINS.split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),

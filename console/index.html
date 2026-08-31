@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>WeKnora MCP 管理</title>
+    <link rel="stylesheet" href="/mcp-console/assets/app.css" />
+    <script type="module" src="/mcp-console/assets/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="WeKnora MCP 管理">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <div>
+          <strong>WeKnora</strong>
+          <span>MCP 管理</span>
+        </div>
+      </div>
+      <div class="user-actions">
+        <span id="current-user" class="current-user">-</span>
+        <button id="logout" class="button button-quiet" type="button">退出</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="primary-column" aria-labelledby="knowledge-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">READ-ONLY MCP</p>
+            <h1 id="knowledge-title">知识库访问</h1>
+          </div>
+          <div class="toolbar">
+            <label class="search-field">
+              <span class="sr-only">筛选知识库</span>
+              <input id="knowledge-filter" type="search" placeholder="筛选知识库" autocomplete="off" />
+            </label>
+            <button id="refresh-overview" class="button button-quiet" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div class="table-frame" aria-busy="true">
+          <div class="table-header" aria-hidden="true">
+            <span>允许</span>
+            <span>知识库</span>
+            <span>内容</span>
+            <span>能力</span>
+            <span>默认</span>
+          </div>
+          <div id="knowledge-list" class="knowledge-list"></div>
+          <div id="empty-state" class="empty-state" hidden>没有匹配的知识库</div>
+        </div>
+
+        <div class="actionbar">
+          <span id="selection-summary">-</span>
+          <button id="save-policy" class="button button-primary" type="button" disabled>应用配置</button>
+        </div>
+      </section>
+
+      <aside class="side-column" aria-label="运行状态">
+        <section class="panel" aria-labelledby="service-title">
+          <div class="panel-heading">
+            <h2 id="service-title">服务状态</h2>
+            <span id="last-updated" class="muted">-</span>
+          </div>
+          <div id="service-status" class="service-status"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="policy-title">
+          <div class="panel-heading">
+            <h2 id="policy-title">当前策略</h2>
+          </div>
+          <dl class="policy-summary">
+            <div><dt>默认知识库</dt><dd id="active-default">-</dd></div>
+            <div><dt>允许数量</dt><dd id="active-count">-</dd></div>
+            <div><dt>最近修改</dt><dd id="active-updated">-</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel audit-panel" aria-labelledby="audit-title">
+          <div class="panel-heading">
+            <h2 id="audit-title">变更记录</h2>
+          </div>
+          <ol id="audit-list" class="audit-list"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <div id="app-status" class="toast" aria-live="polite" hidden></div>
+
+    <dialog id="confirm-dialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>应用访问策略</h2>
+        <p id="confirm-summary"></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" value="cancel">取消</button>
+          <button id="confirm-save" class="button button-primary" value="confirm">确认应用</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

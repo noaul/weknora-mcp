@@ -76,6 +76,8 @@ async function connectAdmin(
     upstreamMcpTokenFile: "/run/secrets/admin-token",
     fixedKbId: "51adf856-2722-4a62-be49-b7d1f2cd20b4",
     fixedKbName: "镍基合金",
+    knowledgePolicyFile: "/var/lib/weknora-mcp-console/knowledge-policy.json",
+    knowledgeAuditFile: "/var/lib/weknora-mcp-console/audit.ndjson",
     adminImportRoot: importRoot,
     allowedOrigins: [],
     rateLimitIpPerMinute: 120,

@@ -19,6 +19,7 @@ import {
   buildWwwAuthenticate,
 } from "./metadata.js";
 import { SlidingWindowLimiter } from "./rate-limit.js";
+import type { KnowledgePolicyProvider } from "./knowledge-policy.js";
 import type { ToolCaller } from "./upstream-client.js";
 
 export interface BuildAppOptions {
@@ -26,6 +27,7 @@ export interface BuildAppOptions {
   verifyToken: (token: string) => Promise<AuthenticatedPrincipal>;
   upstream: ToolCaller;
   adminTools?: Tool[];
+  knowledgePolicy?: KnowledgePolicyProvider;
 }
 
 function bearerToken(header: string | undefined): string | undefined {
@@ -195,8 +197,20 @@ export function buildApp(options: BuildAppOptions) {
             upstream: options.upstream,
           })
         : createGatewayMcpServer({
-            fixedKbId: options.config.fixedKbId,
-            fixedKbName: options.config.fixedKbName,
+            policy:
+              options.knowledgePolicy ??
+              {
+                read: async () => ({
+                  version: 1,
+                  defaultKbId: options.config.fixedKbId,
+                  knowledgeBases: [
+                    {
+                      id: options.config.fixedKbId,
+                      name: options.config.fixedKbName,
+                    },
+                  ],
+                }),
+              },
             upstream: options.upstream,
           });
 

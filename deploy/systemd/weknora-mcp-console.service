@@ -1,0 +1,31 @@
+[Unit]
+Description=WeKnora MCP policy management console
+After=network-online.target weknora-mcp-access-gateway.service weknora-mcp-admin-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/weknora-mcp-console/console.env
+ExecStart=/usr/bin/node /opt/weknora-mcp-console/dist/src/console-index.js
+Restart=on-failure
+RestartSec=5
+User=weknora-console
+Group=weknora-policy
+WorkingDirectory=/opt/weknora-mcp-console
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/etc/weknora-mcp-console
+ReadWritePaths=/var/lib/weknora-mcp-console
+
+[Install]
+WantedBy=multi-user.target

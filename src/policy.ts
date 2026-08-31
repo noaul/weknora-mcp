@@ -12,6 +12,7 @@ export type AllowedToolName = (typeof ALLOWED_TOOL_NAMES)[number];
 const schemas = {
   hybrid_search: z
     .object({
+      kb_id: z.string().uuid().optional(),
       query: z.string().min(1),
       vector_threshold: z.number().min(0).max(1).optional(),
       keyword_threshold: z.number().min(0).max(1).optional(),
@@ -20,13 +21,19 @@ const schemas = {
     .strict(),
   wiki_search: z
     .object({
+      kb_id: z.string().uuid().optional(),
       query: z.string().min(1),
       limit: z.number().int().min(1).max(100).optional(),
     })
     .strict(),
-  wiki_read_page: z.object({ slug: z.string().min(1) }).strict(),
+  wiki_read_page: z
+    .object({ kb_id: z.string().uuid().optional(), slug: z.string().min(1) })
+    .strict(),
   wiki_index_view: z
-    .object({ limit: z.number().int().min(1).max(200).optional() })
+    .object({
+      kb_id: z.string().uuid().optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    })
     .strict(),
 } satisfies Record<AllowedToolName, z.ZodType<Record<string, unknown>>>;
 
@@ -52,9 +59,10 @@ export function prepareUpstreamToolCall(
 
   try {
     const parsed = schemas[name].parse(args);
+    const { kb_id: _requestedKbId, ...upstreamArguments } = parsed;
     return {
       name,
-      arguments: { kb_id: fixedKbId, ...parsed },
+      arguments: { kb_id: fixedKbId, ...upstreamArguments },
     };
   } catch (error) {
     if (error instanceof ZodError) {

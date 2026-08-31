@@ -41,7 +41,7 @@ Never use wildcard callback URIs.
 2. Use the read-only or admin MCP URL from the table above.
 3. Enter the matching client ID and generated client secret.
 4. Complete the Keycloak login and consent flow.
-5. Confirm read-only shows exactly four tools; admin shows the reviewed 30-tool baseline.
+5. Confirm read-only shows five tools; admin shows the reviewed 30-tool baseline.
 
 ## Claude
 
@@ -49,14 +49,14 @@ Never use wildcard callback URIs.
 2. Use the read-only or admin MCP URL from the table above.
 3. Enter the matching client ID and generated client secret.
 4. Complete the Keycloak login and consent flow.
-5. Confirm the displayed tool count matches the chosen profile.
+5. Confirm read-only shows five tools and admin shows the reviewed baseline.
 
 ## Smoke prompts
 
 Read-only:
 
 ```text
-Use WeKnora to search the 镍基合金 knowledge base for 晶界腐蚀 and summarize the strongest matching passages with source titles.
+List the WeKnora knowledge bases allowed by the read-only connection, then search the default knowledge base for 晶界腐蚀 and summarize the strongest matching passages with source titles.
 ```
 
 Admin, non-destructive:

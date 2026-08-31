@@ -5,6 +5,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
+import { FileKnowledgePolicyStore } from "./knowledge-policy.js";
 import { retry } from "./retry.js";
 import { compareToolBaseline, type ToolBaseline } from "./tool-baseline.js";
 import { OfficialWeKnoraMcpClient } from "./upstream-client.js";
@@ -63,6 +64,11 @@ async function main(): Promise<void> {
     config,
     verifyToken,
     upstream,
+    knowledgePolicy: new FileKnowledgePolicyStore({
+      policyFile: config.knowledgePolicyFile,
+      auditFile: config.knowledgeAuditFile,
+      fallback: { id: config.fixedKbId, name: config.fixedKbName },
+    }),
     ...(adminTools ? { adminTools } : {}),
   });
 

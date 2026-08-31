@@ -60,6 +60,8 @@ read_scope_id=$(ensure_scope \
   'weknora:read' 'https://wek.uov.me/mcp' 'weknora-read-audience')
 admin_scope_id=$(ensure_scope \
   'weknora:admin' 'https://wek.uov.me/mcp-admin' 'weknora-admin-audience')
+console_scope_id=$(ensure_scope \
+  'weknora:console' 'weknora-mcp-console' 'weknora-console-audience')
 
 if ! "${kcadm[@]}" get roles/weknora-admin -r weknora >/dev/null 2>&1; then
   "${kcadm[@]}" create roles -r weknora \
@@ -148,5 +150,8 @@ configure_optional_client Claude-read claude-weknora-read \
 configure_optional_client Claude-admin claude-weknora-admin \
   "${CLAUDE_ADMIN_CLIENT_SECRET:-}" "${CLAUDE_ADMIN_REDIRECT_URI:-}" \
   "$admin_scope_id" weknora-admin
+configure_optional_client MCP-console weknora-mcp-console \
+  "${MCP_CONSOLE_CLIENT_SECRET:-}" "${MCP_CONSOLE_REDIRECT_URI:-}" \
+  "$console_scope_id" weknora-admin
 
-echo "Keycloak realm, read/admin scopes, audiences, role, and static clients are configured."
+echo "Keycloak realm, read/admin/console scopes, audiences, role, and static clients are configured."

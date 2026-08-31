@@ -17,6 +17,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/src/index.js",
+    "start:console": "node dist/src/console-index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
