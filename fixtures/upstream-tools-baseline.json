@@ -1,0 +1,60 @@
+{
+  "server": {
+    "name": "weknora-server",
+    "version": "1.1.1"
+  },
+  "tools": [
+    {
+      "name": "hybrid_search",
+      "inputSchema": {
+        "properties": {
+          "kb_id": { "title": "Kb Id", "type": "string" },
+          "keyword_threshold": { "default": 0.3, "title": "Keyword Threshold", "type": "number" },
+          "match_count": { "default": 5, "title": "Match Count", "type": "integer" },
+          "query": { "title": "Query", "type": "string" },
+          "vector_threshold": { "default": 0.5, "title": "Vector Threshold", "type": "number" }
+        },
+        "required": ["kb_id", "query"],
+        "title": "hybrid_searchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "wiki_search",
+      "inputSchema": {
+        "properties": {
+          "kb_id": { "title": "Kb Id", "type": "string" },
+          "limit": { "default": 10, "title": "Limit", "type": "integer" },
+          "query": { "title": "Query", "type": "string" }
+        },
+        "required": ["kb_id", "query"],
+        "title": "wiki_searchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "wiki_read_page",
+      "inputSchema": {
+        "properties": {
+          "kb_id": { "title": "Kb Id", "type": "string" },
+          "slug": { "title": "Slug", "type": "string" }
+        },
+        "required": ["kb_id", "slug"],
+        "title": "wiki_read_pageArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "wiki_index_view",
+      "inputSchema": {
+        "properties": {
+          "kb_id": { "title": "Kb Id", "type": "string" },
+          "limit": { "default": 50, "title": "Limit", "type": "integer" }
+        },
+        "required": ["kb_id"],
+        "title": "wiki_index_viewArguments",
+        "type": "object"
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[Unit]
+Description=OAuth protected WeKnora MCP access gateway
+After=network-online.target weknora-mcp-gateway.service
+Requires=weknora-mcp-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/weknora-mcp-access-gateway/gateway.env
+ExecStart=/usr/bin/node /opt/weknora-mcp-access-gateway/dist/src/index.js
+Restart=on-failure
+RestartSec=5
+User=weknora-gateway
+Group=weknora-gateway
+WorkingDirectory=/opt/weknora-mcp-access-gateway
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

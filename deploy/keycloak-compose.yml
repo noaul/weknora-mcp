@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak-postgres:/var/lib/postgresql/data
+    networks:
+      keycloak-private:
+        ipv4_address: 172.31.250.2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.5
+    restart: unless-stopped
+    command: start
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?set KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: https://wek.uov.me
+      KC_HTTP_RELATIVE_PATH: /oauth
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY_TRUSTED_ADDRESSES: 172.31.250.1/32
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18195:8080"
+    networks:
+      keycloak-private:
+        ipv4_address: 172.31.250.3
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  keycloak-private:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.250.0/28
+
+volumes:
+  keycloak-postgres:
