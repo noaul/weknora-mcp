@@ -4,22 +4,23 @@ OAuth-protected read-only and full-administration gateways for the official Tenc
 
 The project runs in two isolated profiles so remote clients such as ChatGPT and Claude can choose the permission level without sharing credentials or audiences.
 
-## Version 1 policy
+## Read-only policy
 
-- Fixed knowledge base: `镍基合金`
-- Fixed KB ID: `51adf856-2722-4a62-be49-b7d1f2cd20b4`
+- MCP URL example: `https://mcp.example.com/mcp`
+- Server-managed knowledge-base allow-list with one configurable default
 - Required OAuth scope: `weknora:read`
 - Exposed tools:
+  - `list_allowed_knowledge_bases`
   - `hybrid_search`
   - `wiki_search`
   - `wiki_read_page`
   - `wiki_index_view`
-- No client-controlled knowledge-base parameter
+- Optional client-selected `kb_id`, restricted to the server-side allow-list
 - No write, delete, upload, chat, agent, resource, or prompt capability
 
 ## Admin policy
 
-- MCP URL: `https://wek.uov.me/mcp-admin`
+- MCP URL example: `https://mcp.example.com/mcp-admin`
 - Required scope: `weknora:admin`
 - Required Keycloak realm role: `weknora-admin`
 - Exposes the reviewed 30-tool baseline from `tencent-weknora-mcp==1.1.1`
@@ -31,7 +32,7 @@ The project runs in two isolated profiles so remote clients such as ChatGPT and 
 
 ## MCP management console
 
-The optional sidecar console is published at `https://wek.uov.me/mcp-console/`
+The optional sidecar console is published at `https://mcp.example.com/mcp-console/`
 without changing the official WeKnora frontend image. It uses the existing
 Keycloak realm, requires the `weknora-admin` role, and provides:
 
