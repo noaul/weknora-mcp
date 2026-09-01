@@ -4,6 +4,8 @@ OAuth-protected gateway for the official Tencent WeKnora MCP server. ChatGPT
 and Claude use one `/mcp` endpoint, while the server assigns each OAuth client
 its own tool capabilities and knowledge-base scope.
 
+Community: **[LINUX DO 社区](https://linux.do/)**
+
 ## Access model
 
 - MCP URL: `https://mcp.example.com/mcp`
