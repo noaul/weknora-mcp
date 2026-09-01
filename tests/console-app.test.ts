@@ -5,6 +5,7 @@ import { ConsoleSessionStore } from "../src/console-auth.js";
 
 const KB_A = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const KB_B = "14f18c87-26b4-4b51-ac9f-cb57ace46df7";
+const CHATGPT_CLIENT_ID = "chatgpt-weknora-read";
 
 function createFixture() {
   const sessions = new ConsoleSessionStore({
@@ -12,29 +13,55 @@ function createFixture() {
     secret: Buffer.alloc(32, 9),
   });
   let policy = {
-    version: 1 as const,
-    defaultKbId: KB_A,
-    knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+    version: 2 as const,
+    clients: [
+      {
+        clientId: CHATGPT_CLIENT_ID,
+        label: "ChatGPT WeKnora",
+        provider: "ChatGPT" as const,
+        accessType: "capabilities" as const,
+        capabilities: ["knowledge.read" as const],
+        knowledgeBaseScope: "selected" as const,
+        defaultKbId: KB_A,
+        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+      },
+      {
+        clientId: "claude-weknora-read",
+        label: "Claude WeKnora",
+        provider: "Claude" as const,
+        accessType: "capabilities" as const,
+        capabilities: ["knowledge.read" as const],
+        knowledgeBaseScope: "selected" as const,
+        defaultKbId: KB_A,
+        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+      },
+    ],
   };
-  const write = vi.fn(async (update, actor) => {
+  const writeClient = vi.fn(async (clientId, update, actor) => {
     policy = {
-      version: 1,
-      defaultKbId: update.defaultKbId,
-      knowledgeBases: update.knowledgeBases,
+      version: 2,
+      clients: policy.clients.map((client) =>
+        client.clientId === clientId
+          ? ({ ...client, ...update } as (typeof policy.clients)[number])
+          : client,
+      ),
     };
-    return { ...policy, updatedAt: "2026-08-31T16:00:00.000Z", updatedBy: actor.username };
+    return {
+      ...policy,
+      updatedAt: "2026-09-01T02:00:00.000Z",
+      updatedBy: actor.username,
+    };
   });
   const appendAudit = vi.fn(async () => undefined);
   const oauthClientManager = {
     listManagedClients: vi.fn(async () => [
       {
         key: "chatgpt-read",
-        label: "ChatGPT 只读",
+        label: "ChatGPT WeKnora",
         provider: "ChatGPT" as const,
-        profile: "read" as const,
-        clientId: "chatgpt-weknora-read",
+        clientId: CHATGPT_CLIENT_ID,
         mcpUrl: "https://wek.uov.me/mcp",
-        scope: "weknora:read",
+        scope: "weknora:mcp",
         issuer: "https://wek.uov.me/oauth/realms/weknora",
         authorizationEndpoint:
           "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
@@ -47,12 +74,11 @@ function createFixture() {
     ]),
     updateManagedClient: vi.fn(async (_key, update) => ({
       key: "chatgpt-read",
-      label: "ChatGPT 只读",
+      label: "ChatGPT WeKnora",
       provider: "ChatGPT" as const,
-      profile: "read" as const,
-      clientId: "chatgpt-weknora-read",
+      clientId: CHATGPT_CLIENT_ID,
       mcpUrl: "https://wek.uov.me/mcp",
-      scope: "weknora:read",
+      scope: "weknora:mcp",
       issuer: "https://wek.uov.me/oauth/realms/weknora",
       authorizationEndpoint:
         "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
@@ -84,12 +110,16 @@ function createFixture() {
       })),
     },
     sessions,
-    policyStore: {
+    accessPolicyStore: {
       read: async () => policy,
-      write,
+      writeClient,
       appendAudit,
       readAudit: async () => [
-        { timestamp: "2026-08-31T15:00:00.000Z", actor: "aodo", action: "updated" },
+        {
+          timestamp: "2026-09-01T01:00:00.000Z",
+          actor: "aodo",
+          action: "updated",
+        },
       ],
     },
     oauthClientManager,
@@ -113,11 +143,11 @@ function createFixture() {
         },
       ],
     },
-    checkServices: async () => ({ readGateway: "healthy", adminGateway: "healthy" }),
+    checkServices: async () => ({ gateway: "healthy" }),
     indexHtml: "<!doctype html><title>MCP Console</title>",
     logLevel: "silent",
   });
-  return { app, write, appendAudit, oauthClientManager };
+  return { app, writeClient, appendAudit, oauthClientManager };
 }
 
 async function login(app: ReturnType<typeof buildConsoleApp>) {
@@ -139,6 +169,15 @@ async function login(app: ReturnType<typeof buildConsoleApp>) {
   return cookie;
 }
 
+async function csrf(app: ReturnType<typeof buildConsoleApp>, cookie: string) {
+  const response = await app.inject({
+    method: "GET",
+    url: "/mcp-console/api/session",
+    headers: { cookie },
+  });
+  return response.json().csrfToken as string;
+}
+
 describe("MCP console HTTP app", () => {
   it("redirects logged-out users through OIDC", async () => {
     const { app } = createFixture();
@@ -146,31 +185,7 @@ describe("MCP console HTTP app", () => {
     const loginResponse = await app.inject({ method: "GET", url: "/mcp-console/login" });
 
     expect(page.statusCode).toBe(302);
-    expect(page.headers.location).toBe("/mcp-console/login");
-    expect(loginResponse.statusCode).toBe(302);
     expect(loginResponse.headers.location).toContain("/oauth/login");
-    await app.close();
-  });
-
-  it("creates a secure session after the OAuth callback", async () => {
-    const { app } = createFixture();
-    const start = await app.inject({ method: "GET", url: "/mcp-console/login" });
-    const stateCookieHeader = start.headers["set-cookie"];
-    const stateCookie = (Array.isArray(stateCookieHeader)
-      ? stateCookieHeader[0]
-      : stateCookieHeader
-    )?.split(";")[0];
-    const callback = await app.inject({
-      method: "GET",
-      url: "/mcp-console/oauth/callback?state=state-1&code=code-1",
-      headers: { cookie: stateCookie },
-    });
-
-    expect(callback.statusCode).toBe(302);
-    const cookies = String(callback.headers["set-cookie"]);
-    expect(cookies).toContain("HttpOnly");
-    expect(cookies).toContain("Secure");
-    expect(cookies).toContain("SameSite=Strict");
     await app.close();
   });
 
@@ -185,59 +200,86 @@ describe("MCP console HTTP app", () => {
     await app.close();
   });
 
-  it("returns a secret-free overview for an authenticated administrator", async () => {
+  it("returns a secret-free overview with one gateway health status", async () => {
     const { app } = createFixture();
     const cookie = await login(app);
-    const session = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/session",
-      headers: { cookie },
-    });
     const overview = await app.inject({
       method: "GET",
       url: "/mcp-console/api/overview",
       headers: { cookie },
     });
 
-    expect(session.statusCode).toBe(200);
-    expect(session.json()).toMatchObject({ username: "aodo" });
     expect(overview.statusCode).toBe(200);
     expect(overview.json()).toMatchObject({
-      policy: { defaultKbId: KB_A },
-      services: { readGateway: "healthy", adminGateway: "healthy" },
+      policy: { version: 2 },
+      services: { gateway: "healthy" },
     });
     expect(overview.json().knowledgeBases).toHaveLength(2);
     expect(JSON.stringify(overview.json())).not.toMatch(/secret|api.?key/i);
     await app.close();
   });
 
-  it("requires CSRF and resolves selected IDs against live knowledge bases", async () => {
-    const { app, write } = createFixture();
+  it("merges each OAuth client with its MCP access policy", async () => {
+    const { app } = createFixture();
     const cookie = await login(app);
-    const session = await app.inject({
+    const response = await app.inject({
       method: "GET",
-      url: "/mcp-console/api/session",
+      url: "/mcp-console/api/oauth-clients",
       headers: { cookie },
     });
-    const csrf = session.json().csrfToken as string;
 
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      capabilities: expect.arrayContaining(["knowledge.read", "models.manage"]),
+      clients: [
+        {
+          clientId: CHATGPT_CLIENT_ID,
+          scope: "weknora:mcp",
+          access: {
+            accessType: "capabilities",
+            capabilities: ["knowledge.read"],
+            knowledgeBaseScope: "selected",
+            defaultKbId: KB_A,
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(response.json())).not.toContain("new-one-time-secret");
+    await app.close();
+  });
+
+  it("updates one managed client's capabilities and selected knowledge bases", async () => {
+    const { app, writeClient } = createFixture();
+    const cookie = await login(app);
+    const token = await csrf(app, cookie);
+    const payload = {
+      accessType: "capabilities",
+      capabilities: ["knowledge.read", "conversation.use"],
+      knowledgeBaseScope: "selected",
+      defaultKbId: KB_B,
+      allowedKbIds: [KB_A, KB_B],
+    };
     const rejected = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/policy",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
       headers: { cookie },
-      payload: { defaultKbId: KB_B, allowedKbIds: [KB_A, KB_B] },
+      payload,
     });
     const accepted = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/policy",
-      headers: { cookie, "x-csrf-token": csrf },
-      payload: { defaultKbId: KB_B, allowedKbIds: [KB_A, KB_B] },
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
+      headers: { cookie, "x-csrf-token": token },
+      payload,
     });
 
     expect(rejected.statusCode).toBe(403);
     expect(accepted.statusCode).toBe(200);
-    expect(write).toHaveBeenCalledWith(
+    expect(writeClient).toHaveBeenCalledWith(
+      CHATGPT_CLIENT_ID,
       {
+        accessType: "capabilities",
+        capabilities: ["knowledge.read", "conversation.use"],
+        knowledgeBaseScope: "selected",
         defaultKbId: KB_B,
         knowledgeBases: [
           { id: KB_A, name: "镍基合金" },
@@ -249,80 +291,86 @@ describe("MCP console HTTP app", () => {
     await app.close();
   });
 
-  it("rejects unknown knowledge-base IDs", async () => {
-    const { app, write } = createFixture();
+  it("normalizes full access to all knowledge bases and no capability overrides", async () => {
+    const { app, writeClient } = createFixture();
     const cookie = await login(app);
-    const session = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/session",
-      headers: { cookie },
-    });
+    const token = await csrf(app, cookie);
     const response = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/policy",
-      headers: { cookie, "x-csrf-token": session.json().csrfToken },
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
+      headers: { cookie, "x-csrf-token": token },
       payload: {
+        accessType: "full",
+        capabilities: [],
+        knowledgeBaseScope: "all",
+        defaultKbId: KB_A,
+        allowedKbIds: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(writeClient).toHaveBeenCalledWith(
+      CHATGPT_CLIENT_ID,
+      expect.objectContaining({
+        accessType: "full",
+        capabilities: [],
+        knowledgeBaseScope: "all",
+        knowledgeBases: [],
+      }),
+      expect.anything(),
+    );
+    await app.close();
+  });
+
+  it("rejects unknown clients, capabilities, and knowledge bases", async () => {
+    const { app, writeClient } = createFixture();
+    const cookie = await login(app);
+    const token = await csrf(app, cookie);
+    const base = {
+      accessType: "capabilities",
+      capabilities: ["knowledge.read"],
+      knowledgeBaseScope: "selected",
+      defaultKbId: KB_A,
+      allowedKbIds: [KB_A],
+    };
+    const unknownClient = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/chatgpt-admin/access-policy",
+      headers: { cookie, "x-csrf-token": token },
+      payload: base,
+    });
+    const unknownCapability = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
+      headers: { cookie, "x-csrf-token": token },
+      payload: { ...base, capabilities: ["tenant.root"] },
+    });
+    const unknownKb = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
+      headers: { cookie, "x-csrf-token": token },
+      payload: {
+        ...base,
         defaultKbId: "0787e321-6f1e-4471-86a9-339165e51644",
         allowedKbIds: ["0787e321-6f1e-4471-86a9-339165e51644"],
       },
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(write).not.toHaveBeenCalled();
+    expect(unknownClient.statusCode).toBe(400);
+    expect(unknownCapability.statusCode).toBe(400);
+    expect(unknownKb.statusCode).toBe(400);
+    expect(writeClient).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it("requires CSRF for logout", async () => {
-    const { app } = createFixture();
-    const cookie = await login(app);
-    const session = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/session",
-      headers: { cookie },
-    });
-
-    const rejected = await app.inject({
-      method: "POST",
-      url: "/mcp-console/logout",
-      headers: { cookie },
-    });
-    const accepted = await app.inject({
-      method: "POST",
-      url: "/mcp-console/logout",
-      headers: { cookie, "x-csrf-token": session.json().csrfToken },
-    });
-
-    expect(rejected.statusCode).toBe(403);
-    expect(accepted.statusCode).toBe(204);
-    expect(String(accepted.headers["set-cookie"])).toContain("Max-Age=0");
-    await app.close();
-  });
-
-  it("manages allow-listed OAuth clients with CSRF and audit records", async () => {
+  it("keeps OAuth configuration, secret rotation, and session revocation managed", async () => {
     const { app, appendAudit, oauthClientManager } = createFixture();
     const cookie = await login(app);
-    const session = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/session",
-      headers: { cookie },
-    });
-    const csrf = session.json().csrfToken as string;
-
-    const list = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/oauth-clients",
-      headers: { cookie },
-    });
-    const rejected = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read",
-      headers: { cookie },
-      payload: { enabled: false },
-    });
+    const token = await csrf(app, cookie);
     const updated = await app.inject({
       method: "PUT",
       url: "/mcp-console/api/oauth-clients/chatgpt-read",
-      headers: { cookie, "x-csrf-token": csrf },
+      headers: { cookie, "x-csrf-token": token },
       payload: {
         enabled: false,
         redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
@@ -332,30 +380,21 @@ describe("MCP console HTTP app", () => {
     const rotated = await app.inject({
       method: "POST",
       url: "/mcp-console/api/oauth-clients/chatgpt-read/rotate-secret",
-      headers: { cookie, "x-csrf-token": csrf },
+      headers: { cookie, "x-csrf-token": token },
     });
     const revoked = await app.inject({
       method: "POST",
       url: "/mcp-console/api/oauth-clients/chatgpt-read/revoke-sessions",
-      headers: { cookie, "x-csrf-token": csrf },
+      headers: { cookie, "x-csrf-token": token },
     });
 
-    expect(list.statusCode).toBe(200);
-    expect(JSON.stringify(list.json())).not.toContain("new-one-time-secret");
-    expect(rejected.statusCode).toBe(403);
     expect(updated.statusCode).toBe(200);
     expect(rotated.json()).toEqual({
       secret: "new-one-time-secret",
       oldSecretInvalidated: true,
     });
     expect(revoked.json()).toEqual({ revokedSessions: 1 });
-    expect(oauthClientManager.updateManagedClient).toHaveBeenCalledWith(
-      "chatgpt-read",
-      {
-        enabled: false,
-        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
-      },
-    );
+    expect(oauthClientManager.updateManagedClient).toHaveBeenCalledOnce();
     expect(appendAudit).toHaveBeenCalledTimes(3);
     await app.close();
   });

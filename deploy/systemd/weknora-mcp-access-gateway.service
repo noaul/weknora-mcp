@@ -12,6 +12,7 @@ Restart=on-failure
 RestartSec=5
 User=weknora-gateway
 Group=weknora-gateway
+SupplementaryGroups=weknora-import
 WorkingDirectory=/opt/weknora-mcp-access-gateway
 NoNewPrivileges=true
 PrivateTmp=true
@@ -22,6 +23,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
+ReadOnlyPaths=/var/lib/weknora-mcp-import
 IPAddressDeny=any
 IPAddressAllow=localhost
 

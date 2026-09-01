@@ -1,6 +1,11 @@
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 
+import {
+  MCP_CAPABILITIES,
+  type McpAccessPolicy,
+  type McpClientPolicyUpdate,
+} from "./access-policy.js";
 import type {
   ConsoleIdentity,
   ConsoleSession,
@@ -9,14 +14,13 @@ import type {
 import { SessionAuthorizationError } from "./console-auth.js";
 import type {
   ConsoleAuditWriter,
-  KnowledgePolicy,
   KnowledgePolicyActor,
-  KnowledgePolicyUpdate,
 } from "./knowledge-policy.js";
 import type {
   KeycloakAdminClient,
   ManagedOAuthClientUpdate,
 } from "./keycloak-admin.js";
+import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
 import type { WeKnoraKnowledgeBase } from "./weknora-api.js";
 
 const SESSION_COOKIE = "weknora_console_session";
@@ -27,12 +31,22 @@ const callbackSchema = z.object({
   code: z.string().min(1),
 });
 
-const policyUpdateSchema = z
+const clientAccessUpdateSchema = z
   .strictObject({
+    accessType: z.enum(["capabilities", "full"]),
+    capabilities: z.array(z.enum(MCP_CAPABILITIES)),
+    knowledgeBaseScope: z.enum(["all", "selected"]),
     defaultKbId: z.string().uuid(),
-    allowedKbIds: z.array(z.string().uuid()).min(1),
+    allowedKbIds: z.array(z.string().uuid()),
   })
   .superRefine((value, context) => {
+    if (new Set(value.capabilities).size !== value.capabilities.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: "Capability IDs must be unique",
+      });
+    }
     if (new Set(value.allowedKbIds).size !== value.allowedKbIds.length) {
       context.addIssue({
         code: "custom",
@@ -40,18 +54,52 @@ const policyUpdateSchema = z
         message: "Knowledge base IDs must be unique",
       });
     }
-    if (!value.allowedKbIds.includes(value.defaultKbId)) {
+    if (value.accessType === "capabilities" && value.capabilities.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: "Capability access must grant at least one capability",
+      });
+    }
+    if (
+      value.accessType === "full" &&
+      (value.capabilities.length > 0 || value.knowledgeBaseScope !== "all")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["accessType"],
+        message: "Full access must use all knowledge bases without overrides",
+      });
+    }
+    if (
+      value.knowledgeBaseScope === "selected" &&
+      !value.allowedKbIds.includes(value.defaultKbId)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["defaultKbId"],
         message: "Default knowledge base must be allowed",
       });
     }
+    if (
+      (value.knowledgeBaseScope === "selected" && value.allowedKbIds.length === 0) ||
+      (value.knowledgeBaseScope === "all" && value.allowedKbIds.length > 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["allowedKbIds"],
+        message: "Knowledge-base selection does not match its scope",
+      });
+    }
   });
 
-export interface ConsolePolicyStore {
-  read(): Promise<KnowledgePolicy>;
-  write(update: KnowledgePolicyUpdate, actor: KnowledgePolicyActor): Promise<KnowledgePolicy>;
+export interface ConsoleAccessPolicyStore {
+  read(): Promise<McpAccessPolicy>;
+  writeClient(
+    clientId: string,
+    update: McpClientPolicyUpdate,
+    actor: KnowledgePolicyActor,
+  ): Promise<McpAccessPolicy>;
   readAudit(limit: number): Promise<unknown[]>;
   appendAudit: ConsoleAuditWriter["appendAudit"];
 }
@@ -63,7 +111,7 @@ export interface BuildConsoleAppOptions {
     completeLogin(state: string, code: string): Promise<ConsoleIdentity>;
   };
   sessions: ConsoleSessionStore;
-  policyStore: ConsolePolicyStore;
+  accessPolicyStore: ConsoleAccessPolicyStore;
   oauthClientManager: Pick<
     KeycloakAdminClient,
     | "listManagedClients"
@@ -80,13 +128,12 @@ export interface BuildConsoleAppOptions {
 }
 
 const oauthClientParamsSchema = z.object({
-  key: z.enum([
-    "chatgpt-read",
-    "chatgpt-admin",
-    "claude-read",
-    "claude-admin",
-  ]),
+  key: z.enum(["chatgpt-read", "claude-read"]),
 });
+
+const clientIdByKey = new Map(
+  MANAGED_OAUTH_CLIENTS.map(({ key, clientId }) => [key, clientId]),
+);
 
 const oauthClientUpdateSchema = z
   .strictObject({
@@ -189,7 +236,7 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     details: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await options.policyStore.appendAudit(
+      await options.accessPolicyStore.appendAudit(
         action,
         { subject: session.subject, username: session.username },
         details,
@@ -263,47 +310,89 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   app.get("/mcp-console/api/overview", async (request, reply) => {
     if (!(await requireSession(request, reply))) return;
     const [policy, knowledgeBases, services, audit] = await Promise.all([
-      options.policyStore.read(),
+      options.accessPolicyStore.read(),
       options.weknora.listKnowledgeBases(),
       options.checkServices(),
-      options.policyStore.readAudit(30),
+      options.accessPolicyStore.readAudit(30),
     ]);
     return { policy, knowledgeBases, services, audit };
-  });
-
-  app.put("/mcp-console/api/policy", async (request, reply) => {
-    const session = await requireCsrfSession(request, reply);
-    if (!session) return;
-
-    const parsed = policyUpdateSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_policy" });
-    const liveKnowledgeBases = await options.weknora.listKnowledgeBases();
-    const liveById = new Map(liveKnowledgeBases.map((knowledgeBase) => [knowledgeBase.id, knowledgeBase]));
-    const unknown = parsed.data.allowedKbIds.find((id) => !liveById.has(id));
-    if (unknown) {
-      return reply.code(400).send({ error: "unknown_knowledge_base", id: unknown });
-    }
-    const knowledgeBases = parsed.data.allowedKbIds.map((id) => {
-      const knowledgeBase = liveById.get(id);
-      if (!knowledgeBase) throw new Error("Knowledge base disappeared during update");
-      return { id, name: knowledgeBase.name };
-    });
-    const policy = await options.policyStore.write(
-      { defaultKbId: parsed.data.defaultKbId, knowledgeBases },
-      { subject: session.subject, username: session.username },
-    );
-    return { policy };
   });
 
   app.get("/mcp-console/api/oauth-clients", async (request, reply) => {
     if (!(await requireSession(request, reply))) return;
     try {
-      return { clients: await options.oauthClientManager.listManagedClients() };
+      const [clients, policy] = await Promise.all([
+        options.oauthClientManager.listManagedClients(),
+        options.accessPolicyStore.read(),
+      ]);
+      return {
+        capabilities: MCP_CAPABILITIES,
+        clients: clients.map((client) => {
+          const access = policy.clients.find(
+            ({ clientId }) => clientId === client.clientId,
+          );
+          if (!access) {
+            throw new Error(`OAuth client ${client.clientId} has no access policy`);
+          }
+          return { ...client, access };
+        }),
+      };
     } catch (error) {
       request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
       return reply.code(502).send({ error: "oauth_client_service_unavailable" });
     }
   });
+
+  app.put(
+    "/mcp-console/api/oauth-clients/:key/access-policy",
+    async (request, reply) => {
+      const session = await requireCsrfSession(request, reply);
+      if (!session) return;
+      const params = oauthClientParamsSchema.safeParse(request.params);
+      const update = clientAccessUpdateSchema.safeParse(request.body);
+      if (!params.success || !update.success) {
+        return reply.code(400).send({ error: "invalid_client_access_policy" });
+      }
+      const clientId = clientIdByKey.get(params.data.key);
+      if (!clientId) {
+        return reply.code(400).send({ error: "invalid_oauth_client" });
+      }
+
+      const liveKnowledgeBases = await options.weknora.listKnowledgeBases();
+      const liveById = new Map(
+        liveKnowledgeBases.map((knowledgeBase) => [knowledgeBase.id, knowledgeBase]),
+      );
+      if (!liveById.has(update.data.defaultKbId)) {
+        return reply.code(400).send({
+          error: "unknown_knowledge_base",
+          id: update.data.defaultKbId,
+        });
+      }
+      const unknown = update.data.allowedKbIds.find((id) => !liveById.has(id));
+      if (unknown) {
+        return reply.code(400).send({ error: "unknown_knowledge_base", id: unknown });
+      }
+      const knowledgeBases = update.data.allowedKbIds.map((id) => {
+        const knowledgeBase = liveById.get(id);
+        if (!knowledgeBase) throw new Error("Knowledge base disappeared during update");
+        return { id, name: knowledgeBase.name };
+      });
+      const policy = await options.accessPolicyStore.writeClient(
+        clientId,
+        {
+          accessType: update.data.accessType,
+          capabilities: update.data.capabilities,
+          knowledgeBaseScope: update.data.knowledgeBaseScope,
+          defaultKbId: update.data.defaultKbId,
+          knowledgeBases,
+        },
+        { subject: session.subject, username: session.username },
+      );
+      return {
+        clientPolicy: policy.clients.find((client) => client.clientId === clientId),
+      };
+    },
+  );
 
   app.put("/mcp-console/api/oauth-clients/:key", async (request, reply) => {
     const session = await requireCsrfSession(request, reply);

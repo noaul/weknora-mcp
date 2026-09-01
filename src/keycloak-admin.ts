@@ -4,11 +4,9 @@ export interface ManagedOAuthClientDefinition {
   key: string;
   label: string;
   provider: "ChatGPT" | "Claude";
-  profile: "read" | "admin";
   clientId: string;
   mcpUrl: string;
   scope: string;
-  requiredRole?: string;
 }
 
 export interface ManagedOAuthClientSummary extends ManagedOAuthClientDefinition {
@@ -28,41 +26,19 @@ export interface ManagedOAuthClientUpdate {
 export const MANAGED_OAUTH_CLIENTS: ManagedOAuthClientDefinition[] = [
   {
     key: "chatgpt-read",
-    label: "ChatGPT 只读",
+    label: "ChatGPT WeKnora",
     provider: "ChatGPT",
-    profile: "read",
     clientId: "chatgpt-weknora-read",
     mcpUrl: "https://wek.uov.me/mcp",
-    scope: "weknora:read",
-  },
-  {
-    key: "chatgpt-admin",
-    label: "ChatGPT 管理",
-    provider: "ChatGPT",
-    profile: "admin",
-    clientId: "chatgpt-weknora-admin",
-    mcpUrl: "https://wek.uov.me/mcp-admin",
-    scope: "weknora:admin",
-    requiredRole: "weknora-admin",
+    scope: "weknora:mcp",
   },
   {
     key: "claude-read",
-    label: "Claude 只读",
+    label: "Claude WeKnora",
     provider: "Claude",
-    profile: "read",
     clientId: "claude-weknora-read",
     mcpUrl: "https://wek.uov.me/mcp",
-    scope: "weknora:read",
-  },
-  {
-    key: "claude-admin",
-    label: "Claude 管理",
-    provider: "Claude",
-    profile: "admin",
-    clientId: "claude-weknora-admin",
-    mcpUrl: "https://wek.uov.me/mcp-admin",
-    scope: "weknora:admin",
-    requiredRole: "weknora-admin",
+    scope: "weknora:mcp",
   },
 ];
 

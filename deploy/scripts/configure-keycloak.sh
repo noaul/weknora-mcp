@@ -56,17 +56,15 @@ ensure_scope() {
   printf '%s\n' "$scope_id"
 }
 
-read_scope_id=$(ensure_scope \
-  'weknora:read' 'https://wek.uov.me/mcp' 'weknora-read-audience')
-admin_scope_id=$(ensure_scope \
-  'weknora:admin' 'https://wek.uov.me/mcp-admin' 'weknora-admin-audience')
+mcp_scope_id=$(ensure_scope \
+  'weknora:mcp' 'https://wek.uov.me/mcp' 'weknora-mcp-audience')
 console_scope_id=$(ensure_scope \
   'weknora:console' 'weknora-mcp-console' 'weknora-console-audience')
 
 if ! "${kcadm[@]}" get roles/weknora-admin -r weknora >/dev/null 2>&1; then
   "${kcadm[@]}" create roles -r weknora \
     -s name=weknora-admin \
-    -s description='May use the full-access WeKnora MCP admin gateway' >/dev/null
+    -s description='May administer the WeKnora MCP management console' >/dev/null
 fi
 
 create_client() {
@@ -149,6 +147,59 @@ configure_optional_client() {
     "$required_role"
 }
 
+configure_retained_client() {
+  local label="$1"
+  local client_id="$2"
+  local secret="$3"
+  local redirect_uri="$4"
+  local scope_id="$5"
+  local id
+  id=$("${kcadm[@]}" get clients -r weknora -q "clientId=$client_id" --fields id \
+    | jq -r '.[0].id // empty')
+  if [[ -z "$id" && ( -z "$secret" || -z "$redirect_uri" ) ]]; then
+    echo "$label is missing; creation requires both a client secret and redirect URI" >&2
+    exit 1
+  fi
+  create_client "$client_id" "$secret" "$redirect_uri" "$scope_id" ''
+}
+
+detach_client_scope() {
+  local client_id="$1"
+  local scope_name="$2"
+  local client_uuid scope_id
+  client_uuid=$("${kcadm[@]}" get clients -r weknora -q "clientId=$client_id" --fields id \
+    | jq -r '.[0].id // empty')
+  scope_id=$("${kcadm[@]}" get client-scopes -r weknora --fields id,name \
+    | jq -r --arg name "$scope_name" '.[] | select(.name == $name) | .id' | head -n1)
+  if [[ -z "$client_uuid" || -z "$scope_id" ]]; then
+    return
+  fi
+  "${kcadm[@]}" delete "clients/$client_uuid/default-client-scopes/$scope_id" \
+    -r weknora >/dev/null 2>&1 || true
+  "${kcadm[@]}" delete "clients/$client_uuid/optional-client-scopes/$scope_id" \
+    -r weknora >/dev/null 2>&1 || true
+}
+
+remove_obsolete_client() {
+  local client_id="$1"
+  local id
+  id=$("${kcadm[@]}" get clients -r weknora -q "clientId=$client_id" --fields id \
+    | jq -r '.[0].id // empty')
+  if [[ -n "$id" ]]; then
+    "${kcadm[@]}" delete "clients/$id" -r weknora >/dev/null
+  fi
+}
+
+remove_obsolete_scope() {
+  local scope_name="$1"
+  local id
+  id=$("${kcadm[@]}" get client-scopes -r weknora --fields id,name \
+    | jq -r --arg name "$scope_name" '.[] | select(.name == $name) | .id' | head -n1)
+  if [[ -n "$id" ]]; then
+    "${kcadm[@]}" delete "client-scopes/$id" -r weknora >/dev/null
+  fi
+}
+
 configure_console_service_client() {
   local secret="$1"
   local client_id=weknora-mcp-console-admin
@@ -191,23 +242,24 @@ configure_console_service_client() {
   done
 }
 
-configure_optional_client ChatGPT-read chatgpt-weknora-read \
+configure_retained_client ChatGPT chatgpt-weknora-read \
   "${CHATGPT_READ_CLIENT_SECRET:-${CHATGPT_CLIENT_SECRET:-}}" \
   "${CHATGPT_READ_REDIRECT_URI:-${CHATGPT_REDIRECT_URI:-}}" \
-  "$read_scope_id" ''
-configure_optional_client ChatGPT-admin chatgpt-weknora-admin \
-  "${CHATGPT_ADMIN_CLIENT_SECRET:-}" "${CHATGPT_ADMIN_REDIRECT_URI:-}" \
-  "$admin_scope_id" weknora-admin
-configure_optional_client Claude-read claude-weknora-read \
+  "$mcp_scope_id"
+configure_retained_client Claude claude-weknora-read \
   "${CLAUDE_READ_CLIENT_SECRET:-${CLAUDE_CLIENT_SECRET:-}}" \
   "${CLAUDE_READ_REDIRECT_URI:-${CLAUDE_REDIRECT_URI:-}}" \
-  "$read_scope_id" ''
-configure_optional_client Claude-admin claude-weknora-admin \
-  "${CLAUDE_ADMIN_CLIENT_SECRET:-}" "${CLAUDE_ADMIN_REDIRECT_URI:-}" \
-  "$admin_scope_id" weknora-admin
+  "$mcp_scope_id"
 configure_optional_client MCP-console weknora-mcp-console \
   "${MCP_CONSOLE_CLIENT_SECRET:-}" "${MCP_CONSOLE_REDIRECT_URI:-}" \
   "$console_scope_id" weknora-admin
 configure_console_service_client "${MCP_CONSOLE_ADMIN_CLIENT_SECRET:-}"
 
-echo "Keycloak realm, read/admin/console scopes, audiences, role, and static clients are configured."
+detach_client_scope chatgpt-weknora-read 'weknora:read'
+detach_client_scope claude-weknora-read 'weknora:read'
+remove_obsolete_client chatgpt-weknora-admin
+remove_obsolete_client claude-weknora-admin
+remove_obsolete_scope 'weknora:read'
+remove_obsolete_scope 'weknora:admin'
+
+echo "Keycloak realm, unified MCP/console scopes, audiences, role, and static clients are configured."

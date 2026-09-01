@@ -23,43 +23,17 @@
       </div>
     </header>
 
-    <nav class="view-tabs" aria-label="管理视图">
-      <button class="view-tab active" type="button" data-view="knowledge" aria-selected="true">知识库</button>
-      <button class="view-tab" type="button" data-view="oauth" aria-selected="false">OAuth 客户端</button>
-    </nav>
-
-    <main id="knowledge-view" class="workspace app-view">
-      <section class="primary-column" aria-labelledby="knowledge-title">
+    <main class="workspace">
+      <section class="client-column" aria-labelledby="oauth-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">READ-ONLY MCP</p>
-            <h1 id="knowledge-title">知识库访问</h1>
+            <p class="eyebrow">按能力授权 / 全权限</p>
+            <h1 id="oauth-title">OAuth 客户端</h1>
           </div>
-          <div class="toolbar">
-            <label class="search-field">
-              <span class="sr-only">筛选知识库</span>
-              <input id="knowledge-filter" type="search" placeholder="筛选知识库" autocomplete="off" />
-            </label>
-            <button id="refresh-overview" class="button button-quiet" type="button">刷新</button>
-          </div>
+          <button id="refresh-oauth-clients" class="button button-quiet" type="button">刷新</button>
         </div>
-
-        <div class="table-frame" aria-busy="true">
-          <div class="table-header" aria-hidden="true">
-            <span>允许</span>
-            <span>知识库</span>
-            <span>内容</span>
-            <span>能力</span>
-            <span>默认</span>
-          </div>
-          <div id="knowledge-list" class="knowledge-list"></div>
-          <div id="empty-state" class="empty-state" hidden>没有匹配的知识库</div>
-        </div>
-
-        <div class="actionbar">
-          <span id="selection-summary">-</span>
-          <button id="save-policy" class="button button-primary" type="button" disabled>应用配置</button>
-        </div>
+        <div id="oauth-client-list" class="oauth-client-list" aria-busy="true"></div>
+        <div id="oauth-empty-state" class="empty-state" hidden>没有可管理的客户端</div>
       </section>
 
       <aside class="side-column" aria-label="运行状态">
@@ -71,14 +45,14 @@
           <div id="service-status" class="service-status"></div>
         </section>
 
-        <section class="panel" aria-labelledby="policy-title">
+        <section class="panel" aria-labelledby="summary-title">
           <div class="panel-heading">
-            <h2 id="policy-title">当前策略</h2>
+            <h2 id="summary-title">授权状态</h2>
           </div>
           <dl class="policy-summary">
-            <div><dt>默认知识库</dt><dd id="active-default">-</dd></div>
-            <div><dt>允许数量</dt><dd id="active-count">-</dd></div>
-            <div><dt>最近修改</dt><dd id="active-updated">-</dd></div>
+            <div><dt>已启用</dt><dd id="oauth-enabled-count">-</dd></div>
+            <div><dt>活跃会话</dt><dd id="oauth-session-count">-</dd></div>
+            <div><dt>知识库范围</dt><dd>按客户端配置</dd></div>
           </dl>
         </section>
 
@@ -91,55 +65,7 @@
       </aside>
     </main>
 
-    <main id="oauth-view" class="oauth-workspace app-view" hidden>
-      <section class="oauth-main" aria-labelledby="oauth-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">CHATGPT / CLAUDE</p>
-            <h1 id="oauth-title">OAuth 客户端</h1>
-          </div>
-          <button id="refresh-oauth-clients" class="button button-quiet" type="button">刷新</button>
-        </div>
-        <div id="oauth-client-list" class="oauth-client-list" aria-busy="true"></div>
-        <div id="oauth-empty-state" class="empty-state" hidden>没有可管理的客户端</div>
-      </section>
-
-      <aside class="oauth-side" aria-label="OAuth 状态">
-        <section class="panel" aria-labelledby="oauth-summary-title">
-          <div class="panel-heading">
-            <h2 id="oauth-summary-title">授权状态</h2>
-          </div>
-          <dl class="policy-summary">
-            <div><dt>已启用</dt><dd id="oauth-enabled-count">-</dd></div>
-            <div><dt>活跃会话</dt><dd id="oauth-session-count">-</dd></div>
-            <div><dt>管理范围</dt><dd>4 个客户端</dd></div>
-          </dl>
-        </section>
-        <section class="panel" aria-labelledby="console-client-title">
-          <div class="panel-heading">
-            <h2 id="console-client-title">Console 登录</h2>
-          </div>
-          <dl class="connection-summary">
-            <div><dt>Client ID</dt><dd>weknora-mcp-console</dd></div>
-            <div><dt>Scope</dt><dd>weknora:console</dd></div>
-            <div><dt>角色</dt><dd>weknora-admin</dd></div>
-          </dl>
-        </section>
-      </aside>
-    </main>
-
     <div id="app-status" class="toast" aria-live="polite" hidden></div>
-
-    <dialog id="confirm-dialog" class="confirm-dialog">
-      <form method="dialog">
-        <h2>应用访问策略</h2>
-        <p id="confirm-summary"></p>
-        <div class="dialog-actions">
-          <button class="button button-quiet" value="cancel">取消</button>
-          <button id="confirm-save" class="button button-primary" value="confirm">确认应用</button>
-        </div>
-      </form>
-    </dialog>
 
     <dialog id="oauth-confirm-dialog" class="confirm-dialog">
       <form method="dialog">

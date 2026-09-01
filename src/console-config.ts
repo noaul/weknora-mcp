@@ -14,14 +14,13 @@ const schema = z.object({
   KEYCLOAK_SERVICE_CLIENT_ID: z.string().min(1),
   KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: z.string().min(1),
   SESSION_SECRET_FILE: z.string().min(1),
-  KNOWLEDGE_POLICY_FILE: z.string().min(1),
-  KNOWLEDGE_AUDIT_FILE: z.string().min(1),
+  MCP_ACCESS_POLICY_FILE: z.string().min(1),
+  MCP_AUDIT_FILE: z.string().min(1),
   FALLBACK_KB_ID: z.string().uuid(),
   FALLBACK_KB_NAME: z.string().min(1),
   WEKNORA_API_URL: z.string().url(),
   WEKNORA_API_KEY_FILE: z.string().min(1),
-  READ_GATEWAY_HEALTH_URL: z.string().url(),
-  ADMIN_GATEWAY_HEALTH_URL: z.string().url(),
+  GATEWAY_HEALTH_URL: z.string().url(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -47,8 +46,7 @@ export interface ConsoleConfig {
   fallbackKnowledgeBase: { id: string; name: string };
   weknoraApiUrl: URL;
   weknoraApiKeyFile: string;
-  readGatewayHealthUrl: URL;
-  adminGatewayHealthUrl: URL;
+  gatewayHealthUrl: URL;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
 }
 
@@ -81,8 +79,7 @@ export function parseConsoleConfig(
   const tokenUrl = new URL(parsed.data.OAUTH_TOKEN_URL);
   const keycloakAdminUrl = new URL(parsed.data.KEYCLOAK_ADMIN_URL);
   const weknoraApiUrl = new URL(parsed.data.WEKNORA_API_URL);
-  const readGatewayHealthUrl = new URL(parsed.data.READ_GATEWAY_HEALTH_URL);
-  const adminGatewayHealthUrl = new URL(parsed.data.ADMIN_GATEWAY_HEALTH_URL);
+  const gatewayHealthUrl = new URL(parsed.data.GATEWAY_HEALTH_URL);
 
   requireHttps("CONSOLE_PUBLIC_URL", publicUrl);
   requireHttps("OAUTH_ISSUER", issuer);
@@ -90,8 +87,7 @@ export function parseConsoleConfig(
   requireLoopback("OAUTH_TOKEN_URL", tokenUrl);
   requireLoopback("KEYCLOAK_ADMIN_URL", keycloakAdminUrl);
   requireLoopback("WEKNORA_API_URL", weknoraApiUrl);
-  requireLoopback("READ_GATEWAY_HEALTH_URL", readGatewayHealthUrl);
-  requireLoopback("ADMIN_GATEWAY_HEALTH_URL", adminGatewayHealthUrl);
+  requireLoopback("GATEWAY_HEALTH_URL", gatewayHealthUrl);
 
   if (!publicUrl.pathname.endsWith("/")) {
     throw new Error("CONSOLE_PUBLIC_URL must end with /");
@@ -113,16 +109,15 @@ export function parseConsoleConfig(
     keycloakServiceClientSecretFile:
       parsed.data.KEYCLOAK_SERVICE_CLIENT_SECRET_FILE,
     sessionSecretFile: parsed.data.SESSION_SECRET_FILE,
-    policyFile: parsed.data.KNOWLEDGE_POLICY_FILE,
-    auditFile: parsed.data.KNOWLEDGE_AUDIT_FILE,
+    policyFile: parsed.data.MCP_ACCESS_POLICY_FILE,
+    auditFile: parsed.data.MCP_AUDIT_FILE,
     fallbackKnowledgeBase: {
       id: parsed.data.FALLBACK_KB_ID,
       name: parsed.data.FALLBACK_KB_NAME,
     },
     weknoraApiUrl,
     weknoraApiKeyFile: parsed.data.WEKNORA_API_KEY_FILE,
-    readGatewayHealthUrl,
-    adminGatewayHealthUrl,
+    gatewayHealthUrl,
     logLevel: parsed.data.LOG_LEVEL,
   };
 }

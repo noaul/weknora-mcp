@@ -7,9 +7,6 @@ curl --fail --silent --show-error \
   "$base/.well-known/oauth-protected-resource/mcp" | jq .
 
 curl --fail --silent --show-error \
-  "$base/.well-known/oauth-protected-resource/mcp-admin" | jq .
-
-curl --fail --silent --show-error \
   "$base/.well-known/oauth-authorization-server/oauth/realms/weknora" | jq .issuer
 
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -19,10 +16,4 @@ status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
 
 test "$status" = "401"
 
-admin_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --request POST "$base/mcp-admin" \
-  --header 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"ping"}')
-
-test "$admin_status" = "401"
-echo "Read/admin metadata is available and both unauthenticated MCP endpoints return 401."
+echo "Unified MCP metadata is available and the unauthenticated endpoint returns 401."

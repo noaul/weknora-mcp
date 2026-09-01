@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "OAuth-protected, read-only MCP gateway for Tencent WeKnora",
+  "description": "OAuth-protected WeKnora MCP gateway with per-client permissions",
   "license": "MIT",
   "repository": {
     "type": "git",

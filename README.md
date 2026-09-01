@@ -1,76 +1,63 @@
 # WeKnora MCP Access Gateway
 
-OAuth-protected read-only and full-administration gateways for the official Tencent WeKnora MCP server.
+OAuth-protected gateway for the official Tencent WeKnora MCP server. ChatGPT
+and Claude use one `/mcp` endpoint, while the server assigns each OAuth client
+its own tool capabilities and knowledge-base scope.
 
-The project runs in two isolated profiles so remote clients such as ChatGPT and Claude can choose the permission level without sharing credentials or audiences.
+## Access model
 
-## Read-only policy
+- MCP URL: `https://mcp.example.com/mcp`
+- OAuth scope: `weknora:mcp`
+- Retained client IDs: `chatgpt-weknora-read` and `claude-weknora-read`
+- Access type: 按能力授权 or 全权限
+- Knowledge-base scope: all or an explicit allow-list with one default
+- Future upstream tools are rejected until their schemas and permissions are reviewed
 
-- MCP URL example: `https://mcp.example.com/mcp`
-- Server-managed knowledge-base allow-list with one configurable default
-- Required OAuth scope: `weknora:read`
-- Exposed tools:
-  - `list_allowed_knowledge_bases`
-  - `hybrid_search`
-  - `wiki_search`
-  - `wiki_read_page`
-  - `wiki_index_view`
-- Optional client-selected `kb_id`, restricted to the server-side allow-list
-- No write, delete, upload, chat, agent, resource, or prompt capability
+Available capability groups are:
 
-## Admin policy
+- `knowledge.read`
+- `conversation.use`
+- `knowledge.write`
+- `knowledge.manage`
+- `agents.read`
+- `models.manage`
 
-- MCP URL example: `https://mcp.example.com/mcp-admin`
-- Required scope: `weknora:admin`
-- Required Keycloak realm role: `weknora-admin`
-- Exposes the reviewed 30-tool baseline from `tencent-weknora-mcp==1.1.1`
-- Uses a separate full-access WeKnora key and upstream bearer secret
-- Rejects future upstream tools until the checked-in baseline is updated
-- Restricts `create_knowledge_from_file` to `ADMIN_IMPORT_ROOT`
-- Can read every knowledge base and invoke the reviewed create, update, upload,
-  and delete administration tools
+The existing `*-read` client IDs are kept only to preserve installed connector
+settings. They are not permanently read-only. Their effective permissions come
+from the server-side access policy.
 
-## MCP management console
+## Management console
 
-The optional sidecar console is published at `https://mcp.example.com/mcp-console/`
-without changing the official WeKnora frontend image. It uses the existing
-Keycloak realm, requires the `weknora-admin` role, and provides:
+The sidecar console at `https://mcp.example.com/mcp-console/` manages both OAuth
+and MCP access without modifying the official WeKnora frontend or images. For
+each ChatGPT or Claude client it provides:
 
-- a live list of WeKnora knowledge bases;
-- a server-side allow-list for the read-only MCP profile;
-- one default knowledge base used when a tool call omits `kb_id`;
-- read/admin gateway health status;
-- append-only policy audit records.
-- ChatGPT and Claude read/admin OAuth client settings, session revocation, and
-  one-time secret rotation results.
+- enable/disable and exact callback URI management;
+- Client ID and OAuth endpoint reference data;
+- one-time Client Secret rotation results;
+- active-session revocation;
+- 按能力 or 全权限 selection;
+- capability checkboxes and knowledge-base selection;
+- default knowledge-base selection and append-only audit records.
 
-The read profile exposes `list_allowed_knowledge_bases` plus the original four
-retrieval tools. Each retrieval tool accepts an optional `kb_id`; the gateway
-rejects IDs outside the configured allow-list before making an upstream call.
+Existing Client Secrets are not readable. A replacement is shown only once
+after rotation. Official MCP currently has no API-key or tenant-member
+management tools, so the console displays those categories as unavailable.
 
-The console runs independently on loopback port `18198`. Its state lives under
-`/var/lib/weknora-mcp-console`, and its secrets live under
-`/etc/weknora-mcp-console`. Upgrading the official `WeKnora-frontend` and
-`WeKnora-app` images does not touch either path.
+## Security boundary
 
-Existing OAuth client secrets are never returned to the browser. Rotating a
-secret generates a replacement, invalidates the old rotated secret, and shows
-the new value once. Disabling a client prevents new logins; already issued JWTs
-remain valid until their configured 10-minute expiry.
+The Tenant API Key is stored only on the server and is used by the official
+WeKnora upstream and the console's internal REST client. ChatGPT and Claude
+receive OAuth access tokens, never the Tenant API Key.
 
-## Security boundaries
-
-1. Read and admin profiles use separate resource URLs, scopes, clients, processes, upstream secrets, and WeKnora keys.
-2. The read gateway registers only approved retrieval tools and resolves every
-   requested KB ID against the server-side allow-list.
-3. The admin gateway exposes only the exact reviewed upstream baseline and additionally requires a realm role.
-4. OAuth access tokens are verified for signature, issuer, audience, expiry, scope, and the configured role.
-5. Client Authorization headers are replaced before upstream calls.
-6. Raw WeKnora and MCP ports remain bound to loopback or a private bridge.
+The gateway verifies token signature, issuer, audience, expiry, scope, and
+OAuth client identity. It exposes only reviewed tools, rechecks permissions on
+every call, rejects unauthorized knowledge-base IDs before contacting WeKnora,
+and restricts server-local file imports to `ADMIN_IMPORT_ROOT`.
 
 ## Development
 
-Requirements: Node.js 20.20 or newer.
+Requires Node.js 20.20 or newer.
 
 ```bash
 npm install
@@ -79,23 +66,12 @@ npm run typecheck
 npm run build
 ```
 
-Run locally after creating a root-readable upstream token file:
+Repository layout:
 
-```bash
-cp .env.example .env
-set -a
-. ./.env
-set +a
-npm start
-```
-
-## Repository layout
-
-- `src/`: gateway, OAuth validation, policy, upstream MCP client
-- `tests/`: unit and in-memory MCP integration tests
-- `fixtures/`: official upstream tool-schema baseline
-- `scripts/`: drift checks
+- `src/`: gateway, policy, OAuth validation, console, and upstream clients
+- `console/`: independent management UI
+- `fixtures/`: reviewed official MCP tool-schema baselines
 - `deploy/`: Keycloak, systemd, OpenResty, and installation assets
-- `docs/`: implementation plan, client setup, and operations
+- `docs/`: client setup and operations
 
-See [the implementation plan](docs/plans/2026-08-31-weknora-mcp-access-gateway.md), [client setup](docs/client-setup.md), and [operations guide](docs/operations.md).
+See [client setup](docs/client-setup.md) and [operations](docs/operations.md).

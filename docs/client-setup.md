@@ -1,82 +1,82 @@
 # Client Setup
 
-## Choose a connection
+## One connection per application
 
-| Permission | MCP URL | OAuth scope | Required role |
+| Application | Client ID | MCP URL | OAuth scope |
 | --- | --- | --- | --- |
-| Read-only `镍基合金` | `https://wek.uov.me/mcp` | `weknora:read` | none |
-| Full administration | `https://wek.uov.me/mcp-admin` | `weknora:admin` | `weknora-admin` |
+| ChatGPT | `chatgpt-weknora-read` | `https://wek.uov.me/mcp` | `weknora:mcp` |
+| Claude | `claude-weknora-read` | `https://wek.uov.me/mcp` | `weknora:mcp` |
 
-The two connections are separate MCP resources. Add one or both in each client. Do not put admin credentials into the read-only connection.
+The `*-read` suffix is retained for compatibility with the existing installed
+clients. It does not determine access. Open the management console and choose
+按能力 or 全权限 for each client independently.
 
-The admin connection uses a tenant-wide full-access WeKnora key. It can read all
-knowledge bases and invoke the reviewed create, update, upload, and delete
-tools. The read connection remains constrained by the allow-list managed at
-`https://wek.uov.me/mcp-console/`.
-
-OAuth issuer for both profiles:
+OAuth issuer:
 
 ```text
 https://wek.uov.me/oauth/realms/weknora
 ```
 
-The gateway uses static confidential OAuth clients. Anonymous Dynamic Client Registration is disabled.
+Authorization endpoint:
 
-The management console shows the MCP URL, issuer, authorization/token
-endpoints, client ID, scope, required role, exact callback URL, enabled state,
-and active session count for the four ChatGPT/Claude clients. Existing client
-secrets are not readable; rotate a secret to receive its replacement once.
+```text
+https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth
+```
 
-## Keycloak preparation
+Token endpoint:
 
-1. Copy the exact callback URI displayed by ChatGPT or Claude.
-2. Put the matching secret and callback URI in `deploy/keycloak.env`.
-3. Run `deploy/scripts/configure-keycloak.sh` on nc48.
-4. For admin access, assign the Keycloak realm role `weknora-admin` only to approved users.
+```text
+https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token
+```
 
-The script supports these client pairs:
+Anonymous Dynamic Client Registration is disabled. Use the Client ID and
+Client Secret shown or rotated in the management console.
 
-| Client ID | Secret variable | Redirect variable |
-| --- | --- | --- |
-| `chatgpt-weknora-read` | `CHATGPT_READ_CLIENT_SECRET` | `CHATGPT_READ_REDIRECT_URI` |
-| `chatgpt-weknora-admin` | `CHATGPT_ADMIN_CLIENT_SECRET` | `CHATGPT_ADMIN_REDIRECT_URI` |
-| `claude-weknora-read` | `CLAUDE_READ_CLIENT_SECRET` | `CLAUDE_READ_REDIRECT_URI` |
-| `claude-weknora-admin` | `CLAUDE_ADMIN_CLIENT_SECRET` | `CLAUDE_ADMIN_REDIRECT_URI` |
+## Callback URIs
 
-Never use wildcard callback URIs.
+Use the exact callback URI displayed by the application. Wildcards are not
+accepted.
+
+ChatGPT currently uses:
+
+```text
+https://chatgpt.com/connector_platform_oauth_redirect
+```
+
+For Claude, copy the exact callback URI from its custom connector form. Existing
+callbacks and secrets are preserved during the unified-client migration.
 
 ## ChatGPT
 
-1. Enable developer mode and add a remote MCP app.
-2. Use the read-only or admin MCP URL from the table above.
-3. Enter the matching client ID and generated client secret.
+1. Add or refresh the remote MCP connector.
+2. Enter `https://wek.uov.me/mcp`.
+3. Enter Client ID `chatgpt-weknora-read` and its Client Secret.
 4. Complete the Keycloak login and consent flow.
-5. Confirm read-only shows five tools; admin shows the reviewed 30-tool baseline.
+5. Refresh actions after changing permissions in the management console.
 
 ## Claude
 
 1. Open custom connector setup.
-2. Use the read-only or admin MCP URL from the table above.
-3. Enter the matching client ID and generated client secret.
+2. Enter `https://wek.uov.me/mcp`.
+3. Enter Client ID `claude-weknora-read` and its Client Secret.
 4. Complete the Keycloak login and consent flow.
-5. Confirm read-only shows five tools and admin shows the reviewed baseline.
+5. Reconnect or refresh tools after changing permissions.
 
-## Smoke prompts
+## Permission choices
 
-Read-only:
+按能力 mode exposes only tools mapped to the selected capability groups. The
+knowledge-base scope can be all or selected. Selected scope requires at least
+one knowledge base and a default inside that allow-list.
 
-```text
-List the WeKnora knowledge bases allowed by the read-only connection, then search the default knowledge base for 晶界腐蚀 and summarize the strongest matching passages with source titles.
-```
-
-Admin, non-destructive:
-
-```text
-Use WeKnora admin to list all knowledge bases, then show the details of 镍基合金. Do not create, change, or delete anything.
-```
+全权限 mode exposes the complete reviewed official tool baseline and all
+knowledge bases. Destructive tools remain marked destructive, but clients can
+present confirmations differently. Assign this mode only to trusted clients.
 
 ## File ingestion
 
-`create_knowledge_from_file` reads a path on nc48, not a file from the browser. Place approved files in `/var/lib/weknora-mcp-import` through an authenticated server-side transfer, then pass that server path. For content already available to the client, prefer `create_knowledge_from_text` or `create_knowledge_from_url`.
+`create_knowledge_from_file` reads a server-local path. Stage approved files
+under `/var/lib/weknora-mcp-import`; paths outside that directory are rejected.
+For content already available to the client, prefer text or URL ingestion.
 
-Delete tools are marked destructive, but clients may differ in how they request confirmation. Treat the admin connection as full tenant authority.
+The Tenant API Key remains inside the server. Neither ChatGPT nor Claude needs
+or receives it.

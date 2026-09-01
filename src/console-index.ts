@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { FileMcpAccessPolicyStore } from "./access-policy.js";
 import { buildConsoleApp } from "./console-app.js";
 import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
-import { FileKnowledgePolicyStore } from "./knowledge-policy.js";
-import { KeycloakAdminClient } from "./keycloak-admin.js";
+import { KeycloakAdminClient, MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
 async function readSecret(path: string, name: string): Promise<string> {
@@ -61,10 +61,13 @@ async function main(): Promise<void> {
     ttlMs: 8 * 60 * 60_000,
     secret: Buffer.from(sessionSecret, "utf8"),
   });
-  const policyStore = new FileKnowledgePolicyStore({
+  const accessPolicyStore = new FileMcpAccessPolicyStore({
     policyFile: config.policyFile,
     auditFile: config.auditFile,
-    fallback: config.fallbackKnowledgeBase,
+    fallbackKnowledgeBase: config.fallbackKnowledgeBase,
+    defaultClients: MANAGED_OAUTH_CLIENTS.map(
+      ({ clientId, label, provider }) => ({ clientId, label, provider }),
+    ),
   });
   const weknora = new WeKnoraApiClient({
     baseUrl: config.weknoraApiUrl,
@@ -81,12 +84,11 @@ async function main(): Promise<void> {
     publicUrl: config.publicUrl,
     oidc,
     sessions,
-    policyStore,
+    accessPolicyStore,
     oauthClientManager,
     weknora,
     checkServices: async () => ({
-      readGateway: await healthStatus(config.readGatewayHealthUrl),
-      adminGateway: await healthStatus(config.adminGatewayHealthUrl),
+      gateway: await healthStatus(config.gatewayHealthUrl),
     }),
     indexHtml,
     appCss,

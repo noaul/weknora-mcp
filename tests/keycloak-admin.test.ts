@@ -2,17 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   KeycloakAdminClient,
+  MANAGED_OAUTH_CLIENTS,
   type ManagedOAuthClientDefinition,
 } from "../src/keycloak-admin.js";
 
 const definition: ManagedOAuthClientDefinition = {
   key: "chatgpt-read",
-  label: "ChatGPT 只读",
+  label: "ChatGPT WeKnora",
   provider: "ChatGPT",
-  profile: "read",
   clientId: "chatgpt-weknora-read",
   mcpUrl: "https://wek.uov.me/mcp",
-  scope: "weknora:read",
+  scope: "weknora:mcp",
 };
 
 function createClient(fetchImpl: typeof fetch) {
@@ -31,6 +31,25 @@ function createClient(fetchImpl: typeof fetch) {
 }
 
 describe("Keycloak Admin client", () => {
+  it("manages exactly the retained ChatGPT and Claude unified clients", () => {
+    expect(MANAGED_OAUTH_CLIENTS).toEqual([
+      expect.objectContaining({
+        key: "chatgpt-read",
+        clientId: "chatgpt-weknora-read",
+        mcpUrl: "https://wek.uov.me/mcp",
+        scope: "weknora:mcp",
+      }),
+      expect.objectContaining({
+        key: "claude-read",
+        clientId: "claude-weknora-read",
+        mcpUrl: "https://wek.uov.me/mcp",
+        scope: "weknora:mcp",
+      }),
+    ]);
+    expect(JSON.stringify(MANAGED_OAUTH_CLIENTS)).not.toContain("mcp-admin");
+    expect(JSON.stringify(MANAGED_OAUTH_CLIENTS)).not.toContain("weknora:admin");
+  });
+
   it("lists only managed OAuth clients without exposing their secrets", async () => {
     let tokenRequests = 0;
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {

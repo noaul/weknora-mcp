@@ -21,6 +21,10 @@ describe("console deployment assets", () => {
       "OAUTH_TOKEN_URL=http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/token",
     );
     expect(env).toContain("FALLBACK_KB_ID=");
+    expect(env).toContain("MCP_ACCESS_POLICY_FILE=");
+    expect(env).toContain("GATEWAY_HEALTH_URL=http://127.0.0.1:18194/readyz");
+    expect(env).not.toContain("ADMIN_GATEWAY_HEALTH_URL");
+    expect(service).not.toContain("weknora-mcp-admin-gateway");
     expect(env).toContain(
       "KEYCLOAK_SERVICE_CLIENT_SECRET_FILE=/etc/weknora-mcp-console/keycloak-admin-client-secret",
     );

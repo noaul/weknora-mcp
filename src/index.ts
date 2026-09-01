@@ -5,6 +5,7 @@ import { FileMcpAccessPolicyStore } from "./access-policy.js";
 import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
+import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
 import { retry } from "./retry.js";
 import { compareToolBaseline, type ToolBaseline } from "./tool-baseline.js";
 import { OfficialWeKnoraMcpClient } from "./upstream-client.js";
@@ -61,18 +62,9 @@ async function main(): Promise<void> {
         id: config.fallbackKbId,
         name: config.fallbackKbName,
       },
-      defaultClients: [
-        {
-          clientId: "chatgpt-weknora-read",
-          label: "ChatGPT WeKnora",
-          provider: "ChatGPT",
-        },
-        {
-          clientId: "claude-weknora-read",
-          label: "Claude WeKnora",
-          provider: "Claude",
-        },
-      ],
+      defaultClients: MANAGED_OAUTH_CLIENTS.map(
+        ({ clientId, label, provider }) => ({ clientId, label, provider }),
+      ),
     }),
   });
 

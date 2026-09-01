@@ -1,6 +1,6 @@
 [Unit]
 Description=WeKnora MCP policy management console
-After=network-online.target weknora-mcp-access-gateway.service weknora-mcp-admin-gateway.service
+After=network-online.target weknora-mcp-access-gateway.service
 Wants=network-online.target
 
 [Service]

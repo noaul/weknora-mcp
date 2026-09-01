@@ -34,7 +34,7 @@ async function token(
     sub = "user-1",
     ...claims
   } = overrides;
-  return new SignJWT({ scope: "openid weknora:read", azp: "chatgpt", ...claims })
+  return new SignJWT({ scope: "openid weknora:mcp", azp: "chatgpt", ...claims })
     .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "test-key" })
     .setIssuer(String(iss))
     .setAudience(aud as string | string[])
@@ -51,7 +51,7 @@ beforeAll(async () => {
   verifier = createJwtAccessTokenVerifier({
     issuer,
     audience,
-    requiredScope: "weknora:read",
+    requiredScope: "weknora:mcp",
     jwks: verifierJwks,
   });
 });
@@ -61,7 +61,7 @@ describe("JWT access-token verification", () => {
     await expect(verifier(await token())).resolves.toEqual({
       subject: "user-1",
       clientId: "chatgpt",
-      scopes: ["openid", "weknora:read"],
+      scopes: ["openid", "weknora:mcp"],
     });
   });
 
@@ -92,29 +92,29 @@ describe("JWT access-token verification", () => {
     ).rejects.toBeInstanceOf(AuthenticationError);
   });
 
-  it("requires the configured realm role for admin tokens", async () => {
-    const adminVerifier = createJwtAccessTokenVerifier({
+  it("can additionally require a configured realm role", async () => {
+    const roleVerifier = createJwtAccessTokenVerifier({
       issuer,
-      audience: "https://wek.uov.me/mcp-admin",
-      requiredScope: "weknora:admin",
+      audience,
+      requiredScope: "weknora:mcp",
       requiredRole: "weknora-admin",
       jwks: verifierJwks,
     });
 
     await expect(
-      adminVerifier(
+      roleVerifier(
         await token({
-          aud: "https://wek.uov.me/mcp-admin",
-          scope: "openid weknora:admin",
+          aud: audience,
+          scope: "openid weknora:mcp",
           realm_access: { roles: ["weknora-admin"] },
         }),
       ),
     ).resolves.toMatchObject({ subject: "user-1" });
     await expect(
-      adminVerifier(
+      roleVerifier(
         await token({
-          aud: "https://wek.uov.me/mcp-admin",
-          scope: "openid weknora:admin",
+          aud: audience,
+          scope: "openid weknora:mcp",
         }),
       ),
     ).rejects.toBeInstanceOf(AuthorizationError);

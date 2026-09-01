@@ -19,14 +19,13 @@ const validEnv = {
   KEYCLOAK_SERVICE_CLIENT_ID: "weknora-mcp-console-admin",
   KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: "/run/secrets/keycloak-admin-client",
   SESSION_SECRET_FILE: "/run/secrets/session",
-  KNOWLEDGE_POLICY_FILE: "/var/lib/weknora-mcp-console/knowledge-policy.json",
-  KNOWLEDGE_AUDIT_FILE: "/var/lib/weknora-mcp-console/audit.ndjson",
+  MCP_ACCESS_POLICY_FILE: "/var/lib/weknora-mcp-console/access-policy.json",
+  MCP_AUDIT_FILE: "/var/lib/weknora-mcp-console/audit.ndjson",
   FALLBACK_KB_ID: "51adf856-2722-4a62-be49-b7d1f2cd20b4",
   FALLBACK_KB_NAME: "镍基合金",
   WEKNORA_API_URL: "http://127.0.0.1:18091/api/v1/",
   WEKNORA_API_KEY_FILE: "/run/secrets/weknora-key",
-  READ_GATEWAY_HEALTH_URL: "http://127.0.0.1:18194/readyz",
-  ADMIN_GATEWAY_HEALTH_URL: "http://127.0.0.1:18197/readyz",
+  GATEWAY_HEALTH_URL: "http://127.0.0.1:18194/readyz",
 };
 
 describe("console configuration", () => {
@@ -46,6 +45,8 @@ describe("console configuration", () => {
     expect(config.keycloakAdminUrl.href).toBe(
       "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
     );
+    expect(config.policyFile).toContain("access-policy.json");
+    expect(config.gatewayHealthUrl.href).toBe("http://127.0.0.1:18194/readyz");
   });
 
   it("rejects public HTTP and non-loopback internal services", () => {
