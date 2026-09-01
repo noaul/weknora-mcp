@@ -6,28 +6,27 @@ import Fastify, {
 } from "fastify";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { createAdminGatewayMcpServer } from "./admin-gateway-server.js";
+import type { McpAccessPolicyProvider } from "./access-policy.js";
 import {
   AuthenticationError,
   AuthorizationError,
   type AuthenticatedPrincipal,
 } from "./auth.js";
 import type { GatewayConfig } from "./config.js";
-import { createGatewayMcpServer } from "./gateway-server.js";
 import {
   buildProtectedResourceMetadata,
   buildWwwAuthenticate,
 } from "./metadata.js";
 import { SlidingWindowLimiter } from "./rate-limit.js";
-import type { KnowledgePolicyProvider } from "./knowledge-policy.js";
+import { createUnifiedGatewayMcpServer } from "./unified-gateway-server.js";
 import type { ToolCaller } from "./upstream-client.js";
 
 export interface BuildAppOptions {
   config: GatewayConfig;
   verifyToken: (token: string) => Promise<AuthenticatedPrincipal>;
   upstream: ToolCaller;
-  adminTools?: Tool[];
-  knowledgePolicy?: KnowledgePolicyProvider;
+  tools: Tool[];
+  accessPolicy: McpAccessPolicyProvider;
 }
 
 function bearerToken(header: string | undefined): string | undefined {
@@ -46,9 +45,6 @@ function toolName(body: unknown): string | undefined {
 }
 
 export function buildApp(options: BuildAppOptions) {
-  if (options.config.gatewayMode === "admin" && !options.adminTools) {
-    throw new Error("adminTools are required in admin mode");
-  }
   const app = Fastify({
     bodyLimit: options.config.httpBodyLimitBytes,
     trustProxy: (address) => address === "127.0.0.1" || address === "::1",
@@ -124,6 +120,15 @@ export function buildApp(options: BuildAppOptions) {
 
     try {
       const principal = await options.verifyToken(token);
+      if (!principal.clientId) {
+        await reply.code(403).send({ error: "unmanaged_client" });
+        return undefined;
+      }
+      const policy = await options.accessPolicy.read();
+      if (!policy.clients.some(({ clientId }) => clientId === principal.clientId)) {
+        await reply.code(403).send({ error: "unmanaged_client" });
+        return undefined;
+      }
       const ipLimit = ipLimiter.consume(request.ip);
       const subjectLimit = subjectLimiter.consume(principal.subject);
       if (!ipLimit.allowed || !subjectLimit.allowed) {
@@ -189,30 +194,13 @@ export function buildApp(options: BuildAppOptions) {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
-    const server =
-      options.config.gatewayMode === "admin"
-        ? createAdminGatewayMcpServer({
-            tools: options.adminTools ?? [],
-            importRoot: options.config.adminImportRoot ?? "",
-            upstream: options.upstream,
-          })
-        : createGatewayMcpServer({
-            policy:
-              options.knowledgePolicy ??
-              {
-                read: async () => ({
-                  version: 1,
-                  defaultKbId: options.config.fixedKbId,
-                  knowledgeBases: [
-                    {
-                      id: options.config.fixedKbId,
-                      name: options.config.fixedKbName,
-                    },
-                  ],
-                }),
-              },
-            upstream: options.upstream,
-          });
+    const server = createUnifiedGatewayMcpServer({
+      clientId: principal.clientId!,
+      policy: options.accessPolicy,
+      tools: options.tools,
+      importRoot: options.config.importRoot,
+      upstream: options.upstream,
+    });
 
     reply.hijack();
     reply.raw.on("close", () => {
