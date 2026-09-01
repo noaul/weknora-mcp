@@ -72,6 +72,7 @@ describe("console deployment assets", () => {
     );
 
     expect(installer).toContain("weknora-policy");
+    expect(installer).toContain('chmod -R a+rX "$repo_root"');
     expect(installer).toContain("/var/lib/weknora-mcp-console");
     expect(installer).toContain("/etc/weknora-mcp-console");
     expect(installer).toContain("install -o root -g root -m 0600");
