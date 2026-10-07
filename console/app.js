@@ -548,8 +548,9 @@ async function createApiKey(client, name) {
     body: JSON.stringify({ name }),
   });
   state.createdKey = { clientKey: client.key, name: result.key.name, secret: result.secret };
-  showStatus(`已创建 API Key「${result.key.name}」`);
+  showStatus(`已创建 API Key「${result.key.name}」，配置已填入 Key`);
   await loadAll();
+  document.getElementById("mcp-config")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function setApiKeyEnabled(client, key, enabled) {
@@ -680,7 +681,11 @@ function renderTokenConnection(parent, client) {
   }
   parent.append(keys.section);
 
-  const config = group("MCP 配置 (JSON)", created ? `已填入「${created.name}」` : "将 <API Key> 替换为你的 Key");
+  const config = group(
+    "MCP 配置 (JSON)",
+    created ? `已填入 Key「${created.name}」` : "新建 Key 后自动生成",
+  );
+  config.section.id = "mcp-config";
   const formats = el("div", "segmented-control");
   for (const [value, label] of CONFIG_FORMATS) {
     formats.append(
@@ -690,15 +695,52 @@ function renderTokenConnection(parent, client) {
       }),
     );
   }
-  const text = mcpConfigText(client, state.configFormat, created?.secret);
-  const copyConfig = button("复制配置", "secondary", async () => {
-    await navigator.clipboard.writeText(text);
-    showStatus("MCP 配置已复制");
-  });
   const toolbar = el("div", "row wrap-mobile");
-  toolbar.append(formats, el("span", "row-main"), copyConfig);
-  const pre = el("pre", "config-block", text);
-  config.body.append(toolbar, pre);
+  if (created) {
+    const text = mcpConfigText(client, state.configFormat, created.secret);
+    const copyConfig = button("复制配置", "primary", async () => {
+      await navigator.clipboard.writeText(text);
+      showStatus("MCP 配置已复制（含 Key）");
+    });
+    toolbar.append(formats, el("span", "row-main"), copyConfig);
+    config.body.append(toolbar, el("pre", "config-block", text));
+  } else {
+    // Existing keys cannot be shown again, so a complete configuration only
+    // exists for a key created in this page view.
+    const hint = el("div", "row row-stack");
+    const main = el("div", "row-main");
+    appendText(main, "span", "row-title", "生成带 Key 的配置");
+    appendText(
+      main,
+      "span",
+      "row-description",
+      "已有 Key 无法再次查看。为要接入的应用新建一个 Key，这里会直接给出包含该 Key 的完整配置。",
+    );
+    const nameInput = el("input", "text-input");
+    nameInput.placeholder = "应用名称，例如 Codeg";
+    nameInput.maxLength = 60;
+    nameInput.setAttribute("aria-label", "配置用 API Key 名称");
+    const generate = button("新建 Key 并生成配置", "primary", async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        nameInput.focus();
+        return;
+      }
+      generate.disabled = true;
+      try {
+        await createApiKey(client, name);
+      } catch {
+        showStatus("创建 API Key 失败", true);
+        generate.disabled = false;
+      }
+    });
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") generate.click();
+    });
+    hint.append(main, nameInput, generate);
+    toolbar.append(formats);
+    config.body.append(toolbar, hint);
+  }
   parent.append(config.section);
   appendText(
     parent,
