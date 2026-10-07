@@ -39,7 +39,7 @@ WeKnora REST API
 - 调用工具时再次检查能力和知识库范围
 - 未经审核的新增上游工具或 schema 发生变化的工具会被单独隐藏，其余工具继续可用
 - 按能力模式下会话按创建者隔离，客户端只能使用自己创建的会话
-- 支持仅能填写静态 Token 的客户端（如小米手机），Token 仅保存哈希，可轮换、停用和撤销
+- 支持多个具名 API Key（小米手机、LobeHub、Codeg 等），Key 仅保存哈希，可单独停用或删除，创建后直接给出 MCP 配置 JSON
 - 限制服务器本地文件导入目录
 - 提供独立 MCP 管理控制台
 - 记录不包含密钥和 token 的追加式审计日志
@@ -88,7 +88,7 @@ https://mcp.example.com/mcp-console/
 - 设置默认知识库
 - 查看权限变更审计记录
 
-现有 Client Secret 和静态 Token 均不可读取。轮换后生成的新值只显示一次。
+现有 Client Secret 和 API Key 均不可读取。新生成的值只显示一次，丢失时新建即可。
 
 ## 客户端接入
 
@@ -98,9 +98,9 @@ https://mcp.example.com/mcp-console/
 | --- | --- | --- | --- |
 | ChatGPT | `chatgpt-weknora-read` | `https://mcp.example.com/mcp` | `weknora:mcp` |
 | Claude | `claude-weknora-read` | `https://mcp.example.com/mcp` | `weknora:mcp` |
-| 小米手机 | `xiaomi-weknora-token` | `https://mcp.example.com/mcp` | 静态 Token，无 OAuth |
+| 小米手机、LobeHub、Codeg 等 | `token-weknora`（Key 访问） | `https://mcp.example.com/mcp` | API Key，无 OAuth |
 
-小米手机等只能填写“服务器 URL + Auth Token”的客户端使用控制台生成的静态 Token（`wkmcp_…`），权限与知识库范围同样由该客户端的策略决定。
+不能走 OAuth 的客户端使用控制台「Key 访问」里新建的具名 API Key（`wkmcp_…`），所有 Key 共用该客户端的权限与知识库范围。
 
 `*-read` 后缀仅用于兼容已经安装的连接器，不代表客户端永久只读。实际权限完全由服务端策略决定。
 

@@ -6,7 +6,7 @@ import { buildConsoleApp } from "./console-app.js";
 import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
 import { KeycloakAdminClient } from "./keycloak-admin.js";
-import { MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
+import { ACCESS_POLICY_INHERITANCE, MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
 import { FileStaticTokenStore } from "./static-tokens.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     auditFile: config.auditFile,
     fallbackKnowledgeBase: config.fallbackKnowledgeBase,
     defaultClients: MANAGED_ACCESS_CLIENTS,
+    inheritFrom: ACCESS_POLICY_INHERITANCE,
   });
   const weknora = new WeKnoraApiClient({
     baseUrl: config.weknoraApiUrl,

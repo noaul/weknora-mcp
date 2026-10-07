@@ -26,7 +26,8 @@ const knowledgeBaseChoiceSchema = z.strictObject({
 const managedClientSchema = z.strictObject({
   clientId: z.string().trim().min(1).max(200),
   label: z.string().trim().min(1).max(200),
-  provider: z.enum(["ChatGPT", "Claude", "Xiaomi", "LobeHub", "Codeg"]),
+  // Xiaomi, LobeHub and Codeg are legacy per-app token clients kept parseable.
+  provider: z.enum(["ChatGPT", "Claude", "Token", "Xiaomi", "LobeHub", "Codeg"]),
 });
 
 const clientAccessPolicySchema = managedClientSchema
@@ -169,6 +170,7 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
   private readonly auditFile: string;
   private readonly fallbackKnowledgeBase: KnowledgeBaseChoice;
   private readonly defaultClients: ManagedAccessClient[];
+  private readonly inheritFrom: Record<string, string[]>;
   private readonly now: () => Date;
   private writeTail: Promise<void> = Promise.resolve();
 
@@ -177,6 +179,8 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     auditFile: string;
     fallbackKnowledgeBase: KnowledgeBaseChoice;
     defaultClients: ManagedAccessClient[];
+    /** New client id -> legacy client ids whose access it starts with. */
+    inheritFrom?: Record<string, string[]>;
     now?: () => Date;
   }) {
     this.policyFile = options.policyFile;
@@ -185,6 +189,7 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
       options.fallbackKnowledgeBase,
     );
     this.defaultClients = z.array(managedClientSchema).min(1).parse(options.defaultClients);
+    this.inheritFrom = options.inheritFrom ?? {};
     this.now = options.now ?? (() => new Date());
   }
 
@@ -290,11 +295,22 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
       ...policy,
       clients: [
         ...policy.clients,
-        ...missing.map((client) =>
-          migratedClient(client, this.fallbackKnowledgeBase.id, [
+        ...missing.map((client) => {
+          const legacy = policy.clients.find(({ clientId }) =>
+            (this.inheritFrom[client.clientId] ?? []).includes(clientId),
+          );
+          if (legacy) {
+            return clientAccessPolicySchema.parse({
+              ...legacy,
+              clientId: client.clientId,
+              label: client.label,
+              provider: client.provider,
+            });
+          }
+          return migratedClient(client, this.fallbackKnowledgeBase.id, [
             this.fallbackKnowledgeBase,
-          ]),
-        ),
+          ]);
+        }),
       ],
     });
   }

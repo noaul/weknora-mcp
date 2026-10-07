@@ -62,23 +62,27 @@ callbacks and secrets are preserved during the unified-client migration.
 4. Complete the Keycloak login and consent flow.
 5. Reconnect or refresh tools after changing permissions.
 
-## Xiaomi phone (static token)
+## API keys (Xiaomi phone, LobeHub, Codeg, coding agents)
 
-The Xiaomi phone MCP settings accept only a name, a server URL, and an optional
-Auth Token, so this client uses a static Bearer token instead of OAuth.
+Clients that cannot run OAuth use named static API keys of the single
+`Key 访问` client (`token-weknora`). All keys share that client's capabilities
+and knowledge-base scope.
 
-1. In the management console, open `小米手机 WeKnora` (`xiaomi-weknora-token`),
-   choose its capabilities and knowledge bases, and apply the MCP permissions.
-2. Click `生成 Token` and copy the one-time `wkmcp_…` value.
-3. On the phone, add an MCP service: any name, server URL
-   `https://wek.uov.me/mcp`, and the token as Auth Token. Both `wkmcp_…` and
-   `Bearer wkmcp_…` are accepted.
-4. Use `轮换 Token` to replace a leaked token, the enable switch to pause it, or
-   `撤销 Token` to delete it. Changes apply to the next request.
+1. In the management console, open `Key 访问`, choose its capabilities and
+   knowledge bases, and apply the MCP permissions.
+2. Enter a name such as `小米手机`, `LobeHub`, or `Codeg` and click `新建 Key`.
+   The `wkmcp_…` key is shown once; old keys cannot be viewed again, so create
+   a new one when a key is lost.
+3. Copy the ready-made configuration under `MCP 配置 (JSON)`:
+   - Codeg / Claude Code: `{"type": "http", "url": …, "headers": {"Authorization": "Bearer wkmcp_…"}}`
+   - Cursor, Claude Desktop, Cherry Studio: the `mcpServers` form
+   - Xiaomi phone: server URL `https://wek.uov.me/mcp` and the key as Auth Token
+     (`wkmcp_…` and `Bearer wkmcp_…` are both accepted)
+4. Disable or delete a single key from its row; other keys keep working.
+   Changes apply to the next request.
 
-A static token does not expire. Keep this client on the smallest capability set
-and knowledge-base allow-list it needs; read-only `knowledge.read` is the
-default.
+API keys do not expire. Keep `Key 访问` on the smallest capability set and
+knowledge-base allow-list its clients need.
 
 ## Permission choices
 

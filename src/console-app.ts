@@ -21,7 +21,12 @@ import type {
   ManagedOAuthClientUpdate,
 } from "./keycloak-admin.js";
 import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
-import { MANAGED_TOKEN_CLIENTS, type FileStaticTokenStore } from "./static-tokens.js";
+import {
+  MANAGED_TOKEN_CLIENTS,
+  mcpClientConfig,
+  StaticTokenError,
+  type FileStaticTokenStore,
+} from "./static-tokens.js";
 import type { WeKnoraKnowledgeBase } from "./weknora-api.js";
 
 const SESSION_COOKIE = "weknora_console_session";
@@ -120,7 +125,10 @@ export interface BuildConsoleAppOptions {
     | "rotateManagedClientSecret"
     | "revokeManagedClientSessions"
   >;
-  staticTokens: Pick<FileStaticTokenStore, "status" | "rotate" | "setEnabled" | "revoke">;
+  staticTokens: Pick<
+    FileStaticTokenStore,
+    "listKeys" | "createKey" | "setKeyEnabled" | "deleteKey"
+  >;
   weknora: { listKnowledgeBases(): Promise<WeKnoraKnowledgeBase[]> };
   checkServices(): Promise<Record<string, "healthy" | "unavailable">>;
   indexHtml: string;
@@ -144,6 +152,15 @@ const clientIdByKey = new Map(
   ]),
 );
 const tokenClientByKey = new Map(MANAGED_TOKEN_CLIENTS.map((client) => [client.key, client]));
+
+const apiKeyParamsSchema = z.object({
+  key: z.string(),
+  keyId: z.string().regex(/^[a-z0-9]{8,32}$/),
+});
+const apiKeyCreateSchema = z.strictObject({
+  name: z.string().trim().min(1).max(60),
+});
+const apiKeyUpdateSchema = z.strictObject({ enabled: z.boolean() });
 
 const oauthClientUpdateSchema = z
   .strictObject({
@@ -331,11 +348,11 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   app.get("/mcp-console/api/oauth-clients", async (request, reply) => {
     if (!(await requireSession(request, reply))) return;
     try {
-      const [clients, policy, tokenStatuses] = await Promise.all([
+      const [clients, policy, tokenKeys] = await Promise.all([
         options.oauthClientManager.listManagedClients(),
         options.accessPolicyStore.read(),
         Promise.all(
-          MANAGED_TOKEN_CLIENTS.map(({ clientId }) => options.staticTokens.status(clientId)),
+          MANAGED_TOKEN_CLIENTS.map(({ clientId }) => options.staticTokens.listKeys(clientId)),
         ),
       ]);
       const accessFor = (clientId: string) => {
@@ -352,13 +369,12 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
             access: accessFor(client.clientId),
           })),
           ...MANAGED_TOKEN_CLIENTS.map((client, index) => {
-            const status = tokenStatuses[index]!;
+            const keys = tokenKeys[index]!;
             return {
               ...client,
               kind: "token" as const,
-              enabled: status.enabled,
-              hasToken: status.hasToken,
-              tokenCreatedAt: status.createdAt ?? null,
+              enabled: keys.some((key) => key.enabled),
+              keys,
               sessionCount: 0,
               access: accessFor(client.clientId),
             };
@@ -430,25 +446,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     if (!params.success || !update.success) {
       return reply.code(400).send({ error: "invalid_oauth_client_update" });
     }
-    const tokenClient = tokenClientByKey.get(params.data.key);
-    if (tokenClient) {
-      if (update.data.redirectUri !== undefined || update.data.enabled === undefined) {
-        return reply.code(400).send({ error: "invalid_oauth_client_update" });
-      }
-      try {
-        const status = await options.staticTokens.setEnabled(
-          tokenClient.clientId,
-          update.data.enabled,
-        );
-        await recordAudit(request, "static_token.updated", session, {
-          key: tokenClient.key,
-          enabled: status.enabled,
-        });
-        return { client: { key: tokenClient.key, ...status } };
-      } catch (error) {
-        request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
-        return reply.code(409).send({ error: "static_token_missing" });
-      }
+    if (tokenClientByKey.has(params.data.key)) {
+      return reply.code(400).send({ error: "invalid_oauth_client_update" });
     }
     try {
       const client = await options.oauthClientManager.updateManagedClient(
@@ -481,14 +480,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       if (!params.success) {
         return reply.code(400).send({ error: "invalid_oauth_client" });
       }
-      const tokenClient = tokenClientByKey.get(params.data.key);
-      if (tokenClient) {
-        const result = await options.staticTokens.rotate(tokenClient.clientId);
-        await recordAudit(request, "static_token.rotated", session, {
-          key: tokenClient.key,
-          oldTokenInvalidated: result.replacedExisting,
-        });
-        return { secret: result.token, oldSecretInvalidated: result.replacedExisting };
+      if (tokenClientByKey.has(params.data.key)) {
+        return reply.code(400).send({ error: "invalid_oauth_client" });
       }
       try {
         const result = await options.oauthClientManager.rotateManagedClientSecret(
@@ -520,14 +513,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       if (!params.success) {
         return reply.code(400).send({ error: "invalid_oauth_client" });
       }
-      const tokenClient = tokenClientByKey.get(params.data.key);
-      if (tokenClient) {
-        const result = await options.staticTokens.revoke(tokenClient.clientId);
-        await recordAudit(request, "static_token.revoked", session, {
-          key: tokenClient.key,
-          revoked: result.revoked,
-        });
-        return { revokedSessions: result.revoked ? 1 : 0 };
+      if (tokenClientByKey.has(params.data.key)) {
+        return reply.code(400).send({ error: "invalid_oauth_client" });
       }
       try {
         const result = await options.oauthClientManager.revokeManagedClientSessions(
@@ -546,6 +533,80 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       }
     },
   );
+
+  app.post("/mcp-console/api/oauth-clients/:key/keys", async (request, reply) => {
+    const session = await requireCsrfSession(request, reply);
+    if (!session) return;
+    const client = tokenClientByKey.get(String((request.params as { key?: string }).key));
+    const body = apiKeyCreateSchema.safeParse(request.body);
+    if (!client || !body.success) {
+      return reply.code(400).send({ error: "invalid_api_key_request" });
+    }
+    try {
+      const { key, token } = await options.staticTokens.createKey(
+        client.clientId,
+        body.data.name,
+      );
+      await recordAudit(request, "api_key.created", session, {
+        key: client.key,
+        keyId: key.id,
+        name: key.name,
+      });
+      return { key, secret: token, mcpConfig: mcpClientConfig(client.mcpUrl, token) };
+    } catch (error) {
+      if (error instanceof StaticTokenError) {
+        return reply.code(409).send({ error: "api_key_limit_reached" });
+      }
+      throw error;
+    }
+  });
+
+  app.put("/mcp-console/api/oauth-clients/:key/keys/:keyId", async (request, reply) => {
+    const session = await requireCsrfSession(request, reply);
+    if (!session) return;
+    const params = apiKeyParamsSchema.safeParse(request.params);
+    const body = apiKeyUpdateSchema.safeParse(request.body);
+    const client = params.success ? tokenClientByKey.get(params.data.key) : undefined;
+    if (!params.success || !body.success || !client) {
+      return reply.code(400).send({ error: "invalid_api_key_request" });
+    }
+    try {
+      const key = await options.staticTokens.setKeyEnabled(
+        client.clientId,
+        params.data.keyId,
+        body.data.enabled,
+      );
+      await recordAudit(request, "api_key.updated", session, {
+        key: client.key,
+        keyId: key.id,
+        name: key.name,
+        enabled: key.enabled,
+      });
+      return { key };
+    } catch (error) {
+      if (error instanceof StaticTokenError) {
+        return reply.code(404).send({ error: "api_key_not_found" });
+      }
+      throw error;
+    }
+  });
+
+  app.delete("/mcp-console/api/oauth-clients/:key/keys/:keyId", async (request, reply) => {
+    const session = await requireCsrfSession(request, reply);
+    if (!session) return;
+    const params = apiKeyParamsSchema.safeParse(request.params);
+    const client = params.success ? tokenClientByKey.get(params.data.key) : undefined;
+    if (!params.success || !client) {
+      return reply.code(400).send({ error: "invalid_api_key_request" });
+    }
+    const result = await options.staticTokens.deleteKey(client.clientId, params.data.keyId);
+    if (!result.deleted) return reply.code(404).send({ error: "api_key_not_found" });
+    await recordAudit(request, "api_key.deleted", session, {
+      key: client.key,
+      keyId: params.data.keyId,
+    });
+    return result;
+  });
 
   app.post("/mcp-console/logout", async (request, reply) => {
     const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];

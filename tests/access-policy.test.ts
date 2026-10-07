@@ -271,4 +271,42 @@ describe("MCP access policy", () => {
     expect(persisted.clients.find(({ clientId }) => clientId === "xiaomi-weknora-token"))
       .toMatchObject({ defaultKbId: KB_B });
   });
+
+  it("starts a merged token client with the access of the legacy client it replaces", async () => {
+    const root = await mkdtemp(join(tmpdir(), "weknora-access-policy-"));
+    const policyFile = join(root, "policy.json");
+    const legacy = {
+      ...granularPolicy().clients[0]!,
+      clientId: "xiaomi-weknora-token",
+      label: "小米手机 WeKnora",
+      provider: "Xiaomi",
+      knowledgeBaseScope: "all",
+      knowledgeBases: [],
+    };
+    await writeFile(
+      policyFile,
+      JSON.stringify({ ...granularPolicy(), clients: [...granularPolicy().clients, legacy] }),
+    );
+    const store = new FileMcpAccessPolicyStore({
+      policyFile,
+      auditFile: join(root, "audit.ndjson"),
+      fallbackKnowledgeBase: { id: KB_A, name: "镍基合金" },
+      defaultClients: [
+        ...defaultClients,
+        { clientId: "token-weknora", label: "Key 访问", provider: "Token" as const },
+      ],
+      inheritFrom: { "token-weknora": ["xiaomi-weknora-token"] },
+    });
+
+    const merged = (await store.read()).clients.find(
+      ({ clientId }) => clientId === "token-weknora",
+    );
+
+    expect(merged).toMatchObject({
+      label: "Key 访问",
+      provider: "Token",
+      capabilities: ["knowledge.read", "agents.read"],
+      knowledgeBaseScope: "all",
+    });
+  });
 });

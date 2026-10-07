@@ -32,7 +32,8 @@ describe("console assets", () => {
     expect(script).toContain("rotate-secret");
     expect(script).toContain("revoke-sessions");
     expect(script).toContain('client.kind === "token"');
-    expect(script).toContain("撤销 Token");
+    expect(script).toContain("新建 Key");
+    expect(script).toContain("MCP 配置 (JSON)");
     expect(script).toContain("x-csrf-token");
     expect(`${html}${script}`).not.toContain("must-not-leak");
     expect(`${html}${script}`).not.toContain("mcp-admin");

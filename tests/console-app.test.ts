@@ -11,7 +11,7 @@ import { FileStaticTokenStore } from "../src/static-tokens.js";
 const KB_A = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const KB_B = "14f18c87-26b4-4b51-ac9f-cb57ace46df7";
 const CHATGPT_CLIENT_ID = "chatgpt-weknora-read";
-const XIAOMI_CLIENT_ID = "xiaomi-weknora-token";
+const TOKEN_CLIENT_ID = "token-weknora";
 
 function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.json`)) {
   const sessions = new ConsoleSessionStore({
@@ -41,13 +41,8 @@ function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.
         defaultKbId: KB_A,
         knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
       },
-      ...(
-        [
-          [XIAOMI_CLIENT_ID, "小米手机 WeKnora", "Xiaomi"],
-          ["lobehub-weknora-token", "LobeHub WeKnora", "LobeHub"],
-          ["codeg-weknora-token", "Codeg WeKnora", "Codeg"],
-        ] as const
-      ).map(([clientId, label, provider]) => ({
+      ...([[TOKEN_CLIENT_ID, "Key 访问", "Token"]] as const).map(
+        ([clientId, label, provider]) => ({
         clientId,
         label,
         provider,
@@ -56,7 +51,8 @@ function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.
         knowledgeBaseScope: "selected" as const,
         defaultKbId: KB_A,
         knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
-      })),
+      }),
+      ),
     ],
   };
   const writeClient = vi.fn(async (clientId, update, actor) => {
@@ -268,14 +264,12 @@ describe("MCP console HTTP app", () => {
         },
         {
           kind: "token",
-          key: "xiaomi-token",
-          clientId: XIAOMI_CLIENT_ID,
-          hasToken: false,
+          key: "api-keys",
+          clientId: TOKEN_CLIENT_ID,
+          keys: [],
           enabled: false,
           access: { capabilities: ["knowledge.read"] },
         },
-        { kind: "token", key: "lobehub-token", clientId: "lobehub-weknora-token" },
-        { kind: "token", key: "codeg-token", clientId: "codeg-weknora-token" },
       ],
     });
     expect(JSON.stringify(response.json())).not.toContain("new-one-time-secret");
@@ -433,72 +427,65 @@ describe("MCP console HTTP app", () => {
     await app.close();
   });
 
-  it("issues, disables, and revokes a static token for a token client", async () => {
+  it("creates, lists, disables, and deletes named API keys", async () => {
     const { app, appendAudit, oauthClientManager, staticTokens } = createFixture();
     const cookie = await login(app);
     const token = await csrf(app, cookie);
     const headers = { cookie, "x-csrf-token": token };
+    const base = "/mcp-console/api/oauth-clients/api-keys";
 
-    const disableBeforeIssue = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/xiaomi-token",
-      headers,
-      payload: { enabled: false },
-    });
-    expect(disableBeforeIssue.statusCode).toBe(409);
+    const unnamed = await app.inject({ method: "POST", url: `${base}/keys`, headers, payload: { name: " " } });
+    expect(unnamed.statusCode).toBe(400);
+    const noCsrf = await app.inject({ method: "POST", url: `${base}/keys`, headers: { cookie }, payload: { name: "Codeg" } });
+    expect(noCsrf.statusCode).toBe(403);
 
-    const issued = await app.inject({
-      method: "POST",
-      url: "/mcp-console/api/oauth-clients/xiaomi-token/rotate-secret",
-      headers,
+    const created = await app.inject({ method: "POST", url: `${base}/keys`, headers, payload: { name: "Codeg" } });
+    expect(created.statusCode).toBe(200);
+    const { key, secret, mcpConfig } = created.json() as {
+      key: { id: string; name: string };
+      secret: string;
+      mcpConfig: unknown;
+    };
+    expect(secret).toMatch(/^wkmcp_/);
+    expect(mcpConfig).toEqual({
+      type: "http",
+      url: "https://wek.uov.me/mcp",
+      headers: { Authorization: `Bearer ${secret}` },
     });
-    expect(issued.statusCode).toBe(200);
-    const secret = issued.json().secret as string;
-    expect(secret).toMatch(/^wkmcp_[A-Za-z0-9_-]{43}$/);
-    expect(await staticTokens.verify(secret)).toBe(XIAOMI_CLIENT_ID);
-    expect(oauthClientManager.rotateManagedClientSecret).not.toHaveBeenCalled();
+    expect(await staticTokens.verify(secret)).toMatchObject({ clientId: TOKEN_CLIENT_ID, keyName: "Codeg" });
 
-    const listed = await app.inject({
-      method: "GET",
-      url: "/mcp-console/api/oauth-clients",
-      headers: { cookie },
-    });
+    const listed = await app.inject({ method: "GET", url: "/mcp-console/api/oauth-clients", headers: { cookie } });
     expect(JSON.stringify(listed.json())).not.toContain(secret);
-    expect(
-      listed.json().clients.find(({ key }: { key: string }) => key === "xiaomi-token"),
-    ).toMatchObject({ hasToken: true, enabled: true });
-
-    const redirectRejected = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/xiaomi-token",
-      headers,
-      payload: { redirectUri: "https://example.com/callback" },
+    expect(listed.json().clients.at(-1)).toMatchObject({
+      enabled: true,
+      keys: [{ id: key.id, name: "Codeg", enabled: true }],
     });
-    expect(redirectRejected.statusCode).toBe(400);
 
     const disabled = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/oauth-clients/xiaomi-token",
+      url: `${base}/keys/${key.id}`,
       headers,
       payload: { enabled: false },
     });
     expect(disabled.statusCode).toBe(200);
     expect(await staticTokens.verify(secret)).toBeUndefined();
 
-    const revoked = await app.inject({
-      method: "POST",
-      url: "/mcp-console/api/oauth-clients/xiaomi-token/revoke-sessions",
-      headers,
-    });
-    expect(revoked.json()).toEqual({ revokedSessions: 1 });
-    expect(await staticTokens.status(XIAOMI_CLIENT_ID)).toEqual({
-      hasToken: false,
-      enabled: false,
-    });
+    for (const legacy of ["rotate-secret", "revoke-sessions"]) {
+      const response = await app.inject({ method: "POST", url: `${base}/${legacy}`, headers });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(oauthClientManager.rotateManagedClientSecret).not.toHaveBeenCalled();
+
+    const deleted = await app.inject({ method: "DELETE", url: `${base}/keys/${key.id}`, headers });
+    expect(deleted.json()).toEqual({ deleted: true });
+    const missing = await app.inject({ method: "DELETE", url: `${base}/keys/${key.id}`, headers });
+    expect(missing.statusCode).toBe(404);
+    expect(await staticTokens.listKeys(TOKEN_CLIENT_ID)).toEqual([]);
+
     expect(appendAudit.mock.calls.map((call) => (call as unknown[])[0])).toEqual([
-      "static_token.rotated",
-      "static_token.updated",
-      "static_token.revoked",
+      "api_key.created",
+      "api_key.updated",
+      "api_key.deleted",
     ]);
     expect(JSON.stringify(appendAudit.mock.calls)).not.toContain(secret);
     await app.close();

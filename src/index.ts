@@ -5,7 +5,7 @@ import { FileMcpAccessPolicyStore } from "./access-policy.js";
 import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
-import { MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
+import { ACCESS_POLICY_INHERITANCE, MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
 import { retry } from "./retry.js";
 import { FileSessionOwnershipStore } from "./session-ownership.js";
 import { createCombinedTokenVerifier, FileStaticTokenStore } from "./static-tokens.js";
@@ -65,6 +65,7 @@ async function main(): Promise<void> {
         name: config.fallbackKbName,
       },
       defaultClients: MANAGED_ACCESS_CLIENTS,
+      inheritFrom: ACCESS_POLICY_INHERITANCE,
     }),
     sessions: new FileSessionOwnershipStore({ file: config.sessionOwnershipFile }),
   });

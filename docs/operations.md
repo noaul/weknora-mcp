@@ -128,9 +128,12 @@ gateway token file together, then restart both services. Rotate ChatGPT or
 Claude Client Secrets through the console and immediately update the matching
 web connector with the one-time value.
 
-Rotate, disable, or revoke a static-token client (for example
-`xiaomi-weknora-token`) in the console. The gateway reads the token file on
-every request, so the change applies immediately.
+Create, disable, or delete named API keys of the `Key 访问` client
+(`token-weknora`) in the console. The gateway reads the key file on every
+request, so changes apply immediately. A version-1 key file from the former
+per-app token clients is migrated on read: the Xiaomi token becomes the
+`小米手机` key, and `token-weknora` starts with the Xiaomi client's access
+policy.
 
 Disabling a client or revoking its Keycloak sessions does not invalidate an
 already issued JWT until that token expires. The current realm access-token

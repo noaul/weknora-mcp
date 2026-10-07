@@ -769,6 +769,42 @@ input[type="radio"] {
   color: var(--danger);
 }
 
+/* API keys and MCP config */
+
+.row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.created-key {
+  background: #e7f6f1;
+}
+
+.secret-value {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.config-block {
+  margin: 0;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-soft);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Dialogs and toast */
 
 .dialog {

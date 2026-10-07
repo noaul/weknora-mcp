@@ -7,16 +7,13 @@ const CAPABILITY_LABELS = {
   "models.manage": ["模型配置", "读取与配置模型"],
 };
 
-const UNSUPPORTED_CAPABILITIES = ["API Key 管理", "租户成员管理"];
+const UNSUPPORTED_CAPABILITIES = ["WeKnora 租户 API Key 管理", "租户成员管理"];
 
-const TOKEN_SETUP_HINTS = {
-  Xiaomi:
-    "在手机的「MCP 服务」中添加：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
-  LobeHub:
-    "在 LobeHub 的连接器中使用 Streamable HTTP：URL 填上方地址，请求头 Authorization 填 “Bearer <Token>”。",
-  Codeg:
-    "在 Codeg「设置 → MCP → 新建 MCP」中填 JSON：{\"type\": \"http\", \"url\": 上方地址, \"headers\": {\"Authorization\": \"Bearer <Token>\"}}。",
-};
+const CONFIG_FORMATS = [
+  ["http", "Codeg / Claude Code"],
+  ["mcpServers", "mcpServers"],
+  ["fields", "小米手机 / 表单"],
+];
 
 const state = {
   session: null,
@@ -27,6 +24,9 @@ const state = {
   view: "overview",
   pendingAction: null,
   pendingCancel: null,
+  // Plaintext of the API key created in this page view; never persisted.
+  createdKey: null,
+  configFormat: "http",
 };
 
 const elements = {
@@ -137,7 +137,7 @@ function button(label, variant = "secondary", onClick) {
 
 function clientInitial(client) {
   return (
-    { ChatGPT: "G", Claude: "C", Xiaomi: "米", LobeHub: "L", Codeg: "D" }[client.provider] ||
+    { ChatGPT: "G", Claude: "C", Token: "K" }[client.provider] ||
     client.label.slice(0, 1)
   );
 }
@@ -150,8 +150,8 @@ function isToken(client) {
   return client.kind === "token";
 }
 
-function secretName(client) {
-  return isToken(client) ? "Auth Token" : "Client Secret";
+function secretName() {
+  return "Client Secret";
 }
 
 /* Settings rows */
@@ -312,19 +312,6 @@ async function saveOauthClient(client, update) {
   await loadAll();
 }
 
-async function saveTokenClient(client, enabled) {
-  await request(`/mcp-console/api/oauth-clients/${client.key}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "x-csrf-token": state.session.csrfToken,
-    },
-    body: JSON.stringify({ enabled }),
-  });
-  showStatus(`${client.label} Token 已${enabled ? "启用" : "停用"}`);
-  await loadAll();
-}
-
 async function rotateSecret(client) {
   const result = await request(
     `/mcp-console/api/oauth-clients/${client.key}/rotate-secret`,
@@ -338,7 +325,6 @@ async function rotateSecret(client) {
   elements.secretValue.value = result.secret;
   elements.secretDialog.showModal();
   showStatus(`${client.label} ${secretName(client)} 已生成`);
-  if (isToken(client)) await loadAll();
 }
 
 async function revokeSessions(client) {
@@ -349,11 +335,7 @@ async function revokeSessions(client) {
       headers: { "x-csrf-token": state.session.csrfToken },
     },
   );
-  showStatus(
-    isToken(client)
-      ? `${client.label} Token 已撤销`
-      : `已撤销 ${result.revokedSessions} 个 ${client.label} 会话`,
-  );
+  showStatus(`已撤销 ${result.revokedSessions} 个 ${client.label} 会话`);
   await loadAll();
 }
 
@@ -395,7 +377,12 @@ function renderNav() {
 /* Overview */
 
 function clientStatusBadge(client) {
-  if (isToken(client) && !client.hasToken) return el("span", "badge warn", "未生成 Token");
+  if (isToken(client)) {
+    const active = client.keys.filter((key) => key.enabled).length;
+    return client.keys.length === 0
+      ? el("span", "badge warn", "未创建 Key")
+      : el("span", active > 0 ? "badge ok" : "badge off", `${active} / ${client.keys.length} 个 Key 启用`);
+  }
   return client.enabled
     ? el("span", "badge ok", "已启用")
     : el("span", "badge off", "已停用");
@@ -484,35 +471,24 @@ function renderHero(parent, client) {
   const text = el("div", "client-hero-text");
   appendText(text, "h2", "", client.label);
   appendText(text, "code", "", client.clientId);
-  const canToggle = !isToken(client) || client.hasToken;
-  const toggle = switchControl(
-    client.enabled,
-    `启用 ${client.label}`,
-    !canToggle,
-    (checked, input) => {
-      const restore = () => {
-        input.checked = client.enabled;
-      };
-      if (isToken(client)) {
-        confirmAction(
-          `${checked ? "启用" : "停用"} ${client.label}`,
-          checked ? "该 Token 将重新可用。" : "停用后使用该 Token 的请求会被拒绝。",
-          checked ? "确认启用" : "确认停用",
-          () => saveTokenClient(client, checked),
-          { danger: !checked, onCancel: restore },
-        );
-      } else {
-        confirmAction(
-          `${checked ? "启用" : "停用"} ${client.label}`,
-          checked ? "客户端将可以重新发起 OAuth 登录。" : "将停用客户端并阻止新的 OAuth 登录。",
-          checked ? "确认启用" : "确认停用",
-          () => saveOauthClient(client, { enabled: checked, redirectUri: client.redirectUri }),
-          { danger: !checked, onCancel: restore },
-        );
-      }
-    },
-  );
-  hero.append(clientAvatar(client, true), text, clientStatusBadge(client), toggle);
+  hero.append(clientAvatar(client, true), text, clientStatusBadge(client));
+  if (!isToken(client)) {
+    const toggle = switchControl(client.enabled, `启用 ${client.label}`, false, (checked, input) => {
+      confirmAction(
+        `${checked ? "启用" : "停用"} ${client.label}`,
+        checked ? "客户端将可以重新发起 OAuth 登录。" : "将停用客户端并阻止新的 OAuth 登录。",
+        checked ? "确认启用" : "确认停用",
+        () => saveOauthClient(client, { enabled: checked, redirectUri: client.redirectUri }),
+        {
+          danger: !checked,
+          onCancel: () => {
+            input.checked = client.enabled;
+          },
+        },
+      );
+    });
+    hero.append(toggle);
+  }
   parent.append(hero);
 }
 
@@ -556,29 +532,179 @@ function renderOauthConnection(parent, client, draft) {
   parent.append(section);
 }
 
+async function apiKeyRequest(client, path, options) {
+  return request(`/mcp-console/api/oauth-clients/${client.key}/keys${path}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      "x-csrf-token": state.session.csrfToken,
+    },
+  });
+}
+
+async function createApiKey(client, name) {
+  const result = await apiKeyRequest(client, "", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  state.createdKey = { clientKey: client.key, name: result.key.name, secret: result.secret };
+  showStatus(`已创建 API Key「${result.key.name}」`);
+  await loadAll();
+}
+
+async function setApiKeyEnabled(client, key, enabled) {
+  await apiKeyRequest(client, `/${key.id}`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+  showStatus(`API Key「${key.name}」已${enabled ? "启用" : "停用"}`);
+  await loadAll();
+}
+
+async function deleteApiKey(client, key) {
+  await apiKeyRequest(client, `/${key.id}`, { method: "DELETE" });
+  showStatus(`API Key「${key.name}」已删除`);
+  await loadAll();
+}
+
+function mcpConfigText(client, format, secret) {
+  const token = secret || "<API Key>";
+  if (format === "fields") {
+    return [`名称: weknora`, `服务器 URL: ${client.mcpUrl}`, `Auth Token: Bearer ${token}`].join("\n");
+  }
+  const server = {
+    type: "http",
+    url: client.mcpUrl,
+    headers: { Authorization: `Bearer ${token}` },
+  };
+  return JSON.stringify(format === "mcpServers" ? { mcpServers: { weknora: server } } : server, null, 2);
+}
+
 function renderTokenConnection(parent, client) {
-  const { section, body } = group(
-    "连接信息",
-    client.hasToken ? `Token 生成于 ${formatDate(client.tokenCreatedAt)}` : "尚未生成 Token",
-  );
-  body.append(
+  const created =
+    state.createdKey?.clientKey === client.key ? state.createdKey : null;
+  const connection = group("连接信息");
+  connection.body.append(
     valueRow("服务器 URL", client.mcpUrl, true),
-    row("认证方式", "静态 Bearer Token，不需要 OAuth 登录"),
-    row(
-      "Auth Token",
-      client.hasToken ? "已生成，出于安全原因不可再次查看" : "生成后只显示一次",
-      client.hasToken
-        ? el("span", "badge ok", "已生成")
-        : el("span", "badge warn", "未生成"),
-    ),
+    row("认证方式", "静态 Bearer API Key，不需要 OAuth 登录；所有 Key 共用下方的权限设置"),
   );
-  parent.append(section);
+  parent.append(connection.section);
+
+  const keys = group("API Key", `${client.keys.length} 个`);
+  const createRow = el("div", "row row-stack");
+  const createMain = el("div", "row-main");
+  appendText(createMain, "span", "row-title", "新建 API Key");
+  appendText(
+    createMain,
+    "span",
+    "row-description",
+    "每个应用单独建一个，例如“小米手机”“LobeHub”“Codeg”。Key 只在创建后显示一次，旧 Key 不能查看，丢失时新建即可。",
+  );
+  const nameInput = el("input", "text-input");
+  nameInput.placeholder = "名称，例如 Codeg";
+  nameInput.maxLength = 60;
+  nameInput.setAttribute("aria-label", "API Key 名称");
+  const createButton = button("新建 Key", "primary", async () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      return;
+    }
+    createButton.disabled = true;
+    try {
+      await createApiKey(client, name);
+    } catch {
+      showStatus("创建 API Key 失败", true);
+      createButton.disabled = false;
+    }
+  });
+  nameInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createButton.click();
+  });
+  createRow.append(createMain, nameInput, createButton);
+  keys.body.append(createRow);
+
+  if (created) {
+    const createdRow = el("div", "row row-stack created-key");
+    const main = el("div", "row-main");
+    appendText(main, "span", "row-title", `新 Key「${created.name}」`);
+    appendText(main, "span", "row-description", "请立即复制保存，刷新页面后不再显示。");
+    const value = el("code", "secret-value", created.secret);
+    const copy = button("复制 Key", "secondary", async () => {
+      await navigator.clipboard.writeText(created.secret);
+      showStatus("API Key 已复制");
+    });
+    createdRow.append(main, value, copy);
+    keys.body.append(createdRow);
+  }
+
+  if (client.keys.length === 0) {
+    keys.body.append(row("还没有 API Key", "新建一个后即可在客户端中接入"));
+  }
+  for (const key of client.keys) {
+    const actions = el("div", "row-actions");
+    actions.append(
+      switchControl(key.enabled, `启用 ${key.name}`, false, (checked, input) =>
+        confirmAction(
+          `${checked ? "启用" : "停用"} API Key「${key.name}」`,
+          checked ? "该 Key 将重新可用。" : "停用后使用该 Key 的请求会被拒绝，可随时重新启用。",
+          checked ? "确认启用" : "确认停用",
+          () => setApiKeyEnabled(client, key, checked),
+          {
+            danger: !checked,
+            onCancel: () => {
+              input.checked = key.enabled;
+            },
+          },
+        ),
+      ),
+      button("删除", "danger", () =>
+        confirmAction(
+          `删除 API Key「${key.name}」`,
+          "删除后使用该 Key 的客户端立即无法访问，且无法恢复。",
+          "确认删除",
+          () => deleteApiKey(client, key),
+          { danger: true },
+        ),
+      ),
+    );
+    actions.lastChild.classList.add("button-small");
+    keys.body.append(
+      row(
+        key.name,
+        `创建于 ${formatDate(key.createdAt)} · ${key.enabled ? "已启用" : "已停用"}`,
+        actions,
+        `wrap-mobile${key.enabled ? "" : " disabled"}`,
+      ),
+    );
+  }
+  parent.append(keys.section);
+
+  const config = group("MCP 配置 (JSON)", created ? `已填入「${created.name}」` : "将 <API Key> 替换为你的 Key");
+  const formats = el("div", "segmented-control");
+  for (const [value, label] of CONFIG_FORMATS) {
+    formats.append(
+      createSegment(`${client.key}-config-format`, value, label, state.configFormat === value, false, () => {
+        state.configFormat = value;
+        render();
+      }),
+    );
+  }
+  const text = mcpConfigText(client, state.configFormat, created?.secret);
+  const copyConfig = button("复制配置", "secondary", async () => {
+    await navigator.clipboard.writeText(text);
+    showStatus("MCP 配置已复制");
+  });
+  const toolbar = el("div", "row wrap-mobile");
+  toolbar.append(formats, el("span", "row-main"), copyConfig);
+  const pre = el("pre", "config-block", text);
+  config.body.append(toolbar, pre);
+  parent.append(config.section);
   appendText(
     parent,
     "div",
     "callout",
-    TOKEN_SETUP_HINTS[client.provider] ||
-      "在客户端中添加远程 MCP：服务器 URL 填上方地址，请求头 Authorization 填 “Bearer <Token>”。",
+    "Codeg：设置 → MCP → 新建 MCP，粘贴 “Codeg / Claude Code” 格式；Cursor、Claude Desktop、Cherry Studio 等用 “mcpServers” 格式；小米手机按表单逐项填写。",
   );
 }
 
@@ -715,46 +841,35 @@ function renderKnowledgeControls(parent, client, draft) {
 }
 
 function renderSecurity(parent, client) {
-  const token = isToken(client);
+  if (isToken(client)) return;
   const { section, body } = group("安全");
   section.classList.add("danger-zone");
-  const rotateLabel = token ? (client.hasToken ? "轮换 Token" : "生成 Token") : "轮换 Secret";
   body.append(
     row(
-      rotateLabel,
-      token
-        ? "生成新的 Auth Token，现有 Token 立即失效，新值只显示一次"
-        : "生成新的 Client Secret，现有 Secret 立即失效，新值只显示一次",
-      button(rotateLabel, "secondary", () =>
+      "轮换 Secret",
+      "生成新的 Client Secret，现有 Secret 立即失效，新值只显示一次",
+      button("轮换 Secret", "secondary", () =>
         confirmAction(
-          `${rotateLabel}：${client.label}`,
-          token
-            ? "现有 Token（如有）将立即失效，新 Token 只显示一次。"
-            : "现有 Client Secret 将失效，新密钥只显示一次。",
+          `轮换 Secret：${client.label}`,
+          "现有 Client Secret 将失效，新密钥只显示一次。",
           "确认生成",
           () => rotateSecret(client),
         ),
       ),
       "wrap-mobile",
     ),
-  );
-  const revoke = button(token ? "撤销 Token" : "撤销会话", "danger", () =>
-    confirmAction(
-      token ? `撤销 ${client.label} Token` : `撤销 ${client.label} 会话`,
-      token
-        ? "Token 将被删除，客户端需重新填写新 Token 才能使用。"
-        : `将撤销当前 ${client.sessionCount} 个活跃会话。`,
-      "确认撤销",
-      () => revokeSessions(client),
-      { danger: true },
-    ),
-  );
-  revoke.disabled = token && !client.hasToken;
-  body.append(
     row(
-      token ? "撤销 Token" : "撤销会话",
-      token ? "删除 Token，客户端立即无法访问" : `撤销 ${client.sessionCount} 个活跃登录会话`,
-      revoke,
+      "撤销会话",
+      `撤销 ${client.sessionCount} 个活跃登录会话`,
+      button("撤销会话", "danger", () =>
+        confirmAction(
+          `撤销 ${client.label} 会话`,
+          `将撤销当前 ${client.sessionCount} 个活跃会话。`,
+          "确认撤销",
+          () => revokeSessions(client),
+          { danger: true },
+        ),
+      ),
       "wrap-mobile",
     ),
   );
