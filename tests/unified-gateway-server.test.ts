@@ -531,4 +531,77 @@ describe("unified MCP gateway", () => {
       "update_knowledge_from_text",
     ]);
   });
+
+  describe("knowledge base references", () => {
+    const INVENTED = "0787e321-06f0-4aa2-b097-87419a730c6a";
+
+    it("resolves an exact knowledge base name to its id", async () => {
+      const callTool = vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "result" }],
+      }));
+      const { client } = await connect({ upstream: { callTool } });
+
+      const result = await client.callTool({
+        name: "hybrid_search",
+        arguments: { kb_id: "gh3539", query: "成分" },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(callTool).toHaveBeenCalledWith({
+        name: "hybrid_search",
+        arguments: { kb_id: KB_B, query: "成分" },
+      });
+    });
+
+    it("rejects an invented id with a hint instead of forwarding it", async () => {
+      const callTool = vi.fn();
+      const { client } = await connect({ upstream: { callTool } });
+
+      const result = await client.callTool({
+        name: "list_knowledge",
+        arguments: { kb_id: INVENTED },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = JSON.stringify(result.content);
+      expect(text).toMatch(/does not exist or is not allowed/);
+      expect(text).toContain(`Did you mean ${KB_B} (GH3539)?`);
+      expect(callTool).not.toHaveBeenCalled();
+    });
+
+    it("checks owned and shared knowledge bases for all-scope clients", async () => {
+      const allClient: ClientAccessPolicy = {
+        ...selectedClient,
+        knowledgeBaseScope: "all",
+        knowledgeBases: [],
+      };
+      const callTool = vi.fn(async ({ name }): Promise<CallToolResult> => {
+        const payloads: Record<string, unknown> = {
+          list_knowledge_bases: { data: [{ id: KB_B, name: "GH3539" }] },
+          list_shared_knowledge_bases: {
+            data: [{ knowledge_base: { id: KB_C, name: "熔盐堆" }, share_id: "s1" }],
+          },
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(payloads[name] ?? { ok: true }) }],
+        };
+      });
+      const { client } = await connect({ client: allClient, upstream: { callTool } });
+
+      const shared = await client.callTool({
+        name: "list_knowledge",
+        arguments: { kb_id: KB_C },
+      });
+      const invented = await client.callTool({
+        name: "list_knowledge",
+        arguments: { kb_id: INVENTED },
+      });
+
+      expect(shared.isError).not.toBe(true);
+      expect(invented.isError).toBe(true);
+      expect(JSON.stringify(invented.content)).toContain(KB_B);
+      expect(callTool.mock.calls.filter(([call]) => call.name === "list_knowledge"))
+        .toHaveLength(1);
+    });
+  });
 });

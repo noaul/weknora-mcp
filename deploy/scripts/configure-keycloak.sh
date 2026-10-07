@@ -25,6 +25,9 @@ if ! "${kcadm[@]}" get realms/weknora >/dev/null 2>&1; then
     -s resetPasswordAllowed=true
 fi
 
+# deploy/keycloak/themes/weknora is mounted by keycloak-compose.yml.
+"${kcadm[@]}" update realms/weknora -s loginTheme=weknora
+
 ensure_scope() {
   local scope_name="$1"
   local audience="$2"

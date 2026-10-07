@@ -1,0 +1,405 @@
+/*
+ * WeKnora login theme. Layered on top of the keycloak.v2 (PatternFly 5)
+ * stylesheet to match the management console.
+ */
+
+:root {
+  --wk-text: #0d0d0d;
+  --wk-text-secondary: #5d5d5d;
+  --wk-text-tertiary: #8f8f8f;
+  --wk-border: #c2c8d0;
+  --wk-border-soft: #e5e5e5;
+  --wk-surface-soft: #f4f4f4;
+  --wk-primary: #0d0d0d;
+  --wk-primary-hover: #2f2f2f;
+  --wk-focus: #0285ff;
+  --wk-danger: #d00e17;
+  --wk-font:
+    ui-sans-serif, -apple-system, system-ui, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", Helvetica, Arial,
+    sans-serif;
+  --pf-v5-global--FontFamily--text: var(--wk-font);
+  --pf-v5-global--FontFamily--heading: var(--wk-font);
+  --pf-v5-global--link--Color: var(--wk-text);
+  --pf-v5-global--link--Color--hover: var(--wk-text);
+}
+
+html.login-pf,
+.login-pf body {
+  min-height: 100%;
+  background: #ffffff !important;
+}
+
+.login-pf body {
+  color: var(--wk-text);
+  font-family: var(--wk-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.pf-v5-c-login {
+  min-height: 100vh;
+  padding: 72px 20px 40px;
+  background: #ffffff;
+}
+
+.pf-v5-c-login__container {
+  display: grid;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 0;
+  align-content: start;
+  row-gap: 0;
+  grid-template-columns: 100%;
+  grid-template-rows: auto auto;
+}
+
+/* Brand */
+
+.pf-v5-c-login__header {
+  margin: 0 0 32px;
+  padding: 0;
+  text-align: center;
+}
+
+#kc-header-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--wk-text) !important;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: none;
+}
+
+#kc-header-wrapper::before {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--wk-primary);
+  color: #ffffff;
+  content: "W";
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* Card */
+
+.pf-v5-c-login__main,
+.pf-v5-c-login__container > .pf-v5-c-login__main {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pf-v5-c-login__main-header,
+div.pf-v5-c-login__main-header {
+  display: block;
+  margin: 0 0 24px;
+  padding: 0;
+  border-top: 0;
+  text-align: center;
+}
+
+#kc-page-title {
+  margin: 0;
+  color: var(--wk-text);
+  font-family: var(--wk-font);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+#kc-locale,
+.pf-v5-c-login__main-header-utilities {
+  display: none;
+}
+
+.pf-v5-c-login__main-body {
+  padding: 0;
+}
+
+.pf-v5-c-login__main-footer {
+  padding: 0;
+}
+
+.pf-v5-c-form {
+  gap: 16px;
+}
+
+/* Fields */
+
+.pf-v5-c-form__group-label {
+  padding-bottom: 6px !important;
+}
+
+.pf-v5-c-form__label {
+  margin-left: 4px;
+}
+
+.pf-v5-c-form__label-text {
+  color: var(--wk-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--BorderRadius: 999px;
+  min-height: 52px;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.pf-v5-c-form-control::before {
+  border: 1px solid var(--wk-border);
+  border-radius: 999px;
+}
+
+.pf-v5-c-form-control::after {
+  display: none;
+}
+
+.pf-v5-c-form-control:hover::before {
+  border-color: #9aa1aa;
+}
+
+.pf-v5-c-form-control:focus-within::before {
+  border-color: var(--wk-focus);
+  box-shadow: 0 0 0 3px rgba(2, 133, 255, 0.16);
+}
+
+.pf-v5-c-form-control.pf-m-error::before {
+  border-color: var(--wk-danger);
+}
+
+.pf-v5-c-form-control > input,
+.pf-v5-c-form-control > select,
+.pf-v5-c-form-control > textarea {
+  min-height: 52px;
+  padding: 0 20px;
+  color: var(--wk-text);
+  font-family: var(--wk-font);
+  font-size: 16px;
+  outline: none;
+}
+
+.pf-v5-c-form-control__utilities {
+  padding-right: 16px;
+}
+
+/* Password field with an inline visibility toggle */
+
+.pf-v5-c-input-group {
+  position: relative;
+}
+
+.pf-v5-c-input-group .pf-v5-c-form-control > input {
+  padding-right: 56px;
+}
+
+.pf-v5-c-input-group__item:not(.pf-m-fill) {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wk-text-tertiary);
+}
+
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after {
+  display: none;
+}
+
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control:hover {
+  background: var(--wk-surface-soft);
+  color: var(--wk-text);
+}
+
+/* Helper text, errors, links */
+
+.pf-v5-c-form__helper-text {
+  margin: 8px 4px 0;
+  font-size: 13px;
+}
+
+.pf-v5-c-helper-text__item.pf-m-error,
+.pf-v5-c-helper-text__item-text.pf-m-error {
+  color: var(--wk-danger);
+}
+
+.pf-v5-c-login a,
+.pf-v5-c-login a:visited {
+  color: var(--wk-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.pf-v5-c-login a:hover {
+  color: var(--wk-text);
+  text-decoration: underline;
+}
+
+.pf-v5-c-check__input {
+  accent-color: var(--wk-primary);
+}
+
+.pf-v5-c-check__label {
+  color: var(--wk-text-secondary);
+}
+
+/* Buttons */
+
+.pf-v5-c-form__actions {
+  margin-top: 4px;
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-primary,
+.pf-v5-c-login .pf-v5-c-button.pf-m-secondary,
+.pf-v5-c-login .pf-v5-c-button.pf-m-tertiary {
+  min-height: 52px;
+  border-radius: 999px;
+  font-family: var(--wk-font);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--wk-primary);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--wk-primary-hover);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--wk-primary-hover);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--wk-primary-hover);
+  background: var(--wk-primary);
+  color: #ffffff;
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-primary:hover {
+  background: var(--wk-primary-hover);
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-secondary,
+.pf-v5-c-login .pf-v5-c-button.pf-m-tertiary {
+  --pf-v5-c-button--after--BorderColor: var(--wk-border);
+  --pf-v5-c-button--m-secondary--Color: var(--wk-text);
+  --pf-v5-c-button--m-secondary--hover--Color: var(--wk-text);
+  --pf-v5-c-button--m-secondary--hover--after--BorderColor: var(--wk-border);
+  background: #ffffff;
+  color: var(--wk-text);
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-secondary:hover,
+.pf-v5-c-login .pf-v5-c-button.pf-m-tertiary:hover {
+  background: var(--wk-surface-soft);
+}
+
+.pf-v5-c-login .pf-v5-c-button:focus-visible {
+  outline: 2px solid var(--wk-focus);
+  outline-offset: 2px;
+}
+
+.pf-v5-c-login .pf-v5-c-button.pf-m-link {
+  color: var(--wk-text);
+}
+
+/* Alerts */
+
+.pf-v5-c-alert {
+  --pf-v5-c-alert--BoxShadow: none;
+  --pf-v5-c-alert--BorderTopWidth: 0;
+  border-radius: 12px;
+  background: var(--wk-surface-soft);
+  font-size: 14px;
+}
+
+.pf-v5-c-alert.pf-m-danger {
+  background: #fdf1f1;
+}
+
+.pf-v5-c-alert.pf-m-warning {
+  background: #fdf3e6;
+}
+
+.pf-v5-c-alert.pf-m-success {
+  background: #e7f6f1;
+}
+
+.pf-v5-c-alert.pf-m-info {
+  background: var(--wk-surface-soft);
+}
+
+/* Attempted username and restart link */
+
+#kc-username {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--wk-text-secondary);
+}
+
+#kc-attempted-username {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* OAuth consent */
+
+#kc-oauth h3 {
+  margin: 0 0 12px;
+  color: var(--wk-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+#kc-oauth ul {
+  margin: 0 0 24px;
+  padding: 4px 0;
+  border: 1px solid var(--wk-border-soft);
+  border-radius: 16px;
+  list-style: none;
+}
+
+#kc-oauth li {
+  padding: 12px 16px;
+}
+
+#kc-oauth li + li {
+  border-top: 1px solid var(--wk-border-soft);
+}
+
+/* Footer bands (registration, try another way) */
+
+.pf-v5-c-login__main-footer-band {
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wk-text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .pf-v5-c-login {
+    padding-top: 48px;
+  }
+
+  #kc-page-title {
+    font-size: 26px;
+  }
+}

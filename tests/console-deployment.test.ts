@@ -85,4 +85,30 @@ describe("console deployment assets", () => {
     expect(override).toContain("SupplementaryGroups=weknora-policy");
     expect(override).toContain("/opt/weknora-mcp-console/dist/src/index.js");
   });
+
+  it("ships the WeKnora Keycloak login theme and selects it for the realm", async () => {
+    const compose = await readFile("deploy/keycloak-compose.yml", "utf8");
+    const script = await readFile("deploy/scripts/configure-keycloak.sh", "utf8");
+    const properties = await readFile(
+      "deploy/keycloak/themes/weknora/login/theme.properties",
+      "utf8",
+    );
+    const css = await readFile(
+      "deploy/keycloak/themes/weknora/login/resources/css/weknora.css",
+      "utf8",
+    );
+    const messages = await readFile(
+      "deploy/keycloak/themes/weknora/login/messages/messages_en.properties",
+      "utf8",
+    );
+
+    expect(compose).toContain(
+      "./keycloak/themes/weknora:/opt/keycloak/themes/weknora:ro",
+    );
+    expect(script).toContain("-s loginTheme=weknora");
+    expect(properties).toContain("parent=keycloak.v2");
+    expect(properties).toContain("styles=css/styles.css css/weknora.css");
+    expect(css).toContain(".pf-v5-c-login");
+    expect(messages).toContain("loginAccountTitle=欢迎回来");
+  });
 });

@@ -9,86 +9,123 @@
     <script type="module" src="/mcp-console/assets/app.js"></script>
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand" aria-label="WeKnora MCP 管理">
-        <span class="brand-mark" aria-hidden="true">W</span>
-        <div>
-          <strong>WeKnora</strong>
-          <span>MCP 管理</span>
+    <div class="shell">
+      <aside id="sidebar" class="sidebar" aria-label="导航">
+        <div class="sidebar-top">
+          <div class="brand" aria-label="WeKnora MCP 管理">
+            <span class="brand-mark" aria-hidden="true">W</span>
+            <span class="brand-text">
+              <strong>WeKnora</strong>
+              <span>MCP 管理</span>
+            </span>
+          </div>
+          <button id="close-sidebar" class="icon-button sidebar-close" type="button" aria-label="关闭导航">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
-      </div>
-      <div class="user-actions">
-        <span id="current-user" class="current-user">-</span>
-        <button id="logout" class="button button-quiet" type="button">退出</button>
-      </div>
-    </header>
 
-    <main class="workspace">
-      <section class="client-column" aria-labelledby="oauth-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">按能力授权 / 全权限</p>
-            <h1 id="oauth-title">MCP 客户端</h1>
+        <nav class="nav" aria-label="页面">
+          <button id="nav-overview" class="nav-item" type="button" data-view="overview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z" /></svg>
+            <span>概览</span>
+          </button>
+          <p class="nav-label">MCP 客户端</p>
+          <div id="oauth-client-list" class="nav-clients" aria-busy="true"></div>
+          <div id="oauth-empty-state" class="nav-empty" hidden>没有可管理的客户端</div>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="account">
+            <span id="account-avatar" class="avatar" aria-hidden="true">A</span>
+            <span id="current-user" class="current-user">-</span>
           </div>
-          <button id="refresh-oauth-clients" class="button button-quiet" type="button">刷新</button>
+          <button id="logout" class="button button-ghost button-small" type="button">退出</button>
         </div>
-        <div id="oauth-client-list" class="oauth-client-list" aria-busy="true"></div>
-        <div id="oauth-empty-state" class="empty-state" hidden>没有可管理的客户端</div>
-      </section>
-
-      <aside class="side-column" aria-label="运行状态">
-        <section class="panel" aria-labelledby="service-title">
-          <div class="panel-heading">
-            <h2 id="service-title">服务状态</h2>
-            <span id="last-updated" class="muted">-</span>
-          </div>
-          <div id="service-status" class="service-status"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="summary-title">
-          <div class="panel-heading">
-            <h2 id="summary-title">授权状态</h2>
-          </div>
-          <dl class="policy-summary">
-            <div><dt>已启用</dt><dd id="oauth-enabled-count">-</dd></div>
-            <div><dt>活跃会话</dt><dd id="oauth-session-count">-</dd></div>
-            <div><dt>知识库范围</dt><dd>按客户端配置</dd></div>
-          </dl>
-        </section>
-
-        <section class="panel audit-panel" aria-labelledby="audit-title">
-          <div class="panel-heading">
-            <h2 id="audit-title">变更记录</h2>
-          </div>
-          <ol id="audit-list" class="audit-list"></ol>
-        </section>
       </aside>
-    </main>
+      <div id="sidebar-scrim" class="sidebar-scrim" hidden></div>
+
+      <main class="main">
+        <header class="main-header">
+          <button id="open-sidebar" class="icon-button sidebar-open" type="button" aria-label="打开导航">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+          <h1 id="view-title">概览</h1>
+          <button id="refresh-oauth-clients" class="button button-ghost button-small" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
+            <span>刷新</span>
+          </button>
+        </header>
+
+        <div class="content">
+          <section id="overview-view" class="view" aria-labelledby="view-title">
+            <div class="stat-grid">
+              <div class="stat">
+                <span class="stat-label">已启用客户端</span>
+                <strong id="oauth-enabled-count">-</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">活跃会话</span>
+                <strong id="oauth-session-count">-</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">知识库范围</span>
+                <strong class="stat-text">按客户端配置</strong>
+              </div>
+            </div>
+
+            <section class="group" aria-labelledby="service-title">
+              <div class="group-heading">
+                <h2 id="service-title">服务状态</h2>
+                <span id="last-updated" class="muted">-</span>
+              </div>
+              <div id="service-status" class="group-body"></div>
+            </section>
+
+            <section class="group" aria-labelledby="clients-title">
+              <div class="group-heading">
+                <h2 id="clients-title">客户端</h2>
+                <span class="muted">按能力授权 / 全权限 · 知识库范围</span>
+              </div>
+              <div id="overview-clients" class="group-body"></div>
+            </section>
+
+            <section class="group" aria-labelledby="audit-title">
+              <div class="group-heading">
+                <h2 id="audit-title">变更记录</h2>
+              </div>
+              <ol id="audit-list" class="group-body audit-list"></ol>
+            </section>
+          </section>
+
+          <section id="client-view" class="view" hidden></section>
+        </div>
+      </main>
+    </div>
 
     <div id="app-status" class="toast" aria-live="polite" hidden></div>
 
-    <dialog id="oauth-confirm-dialog" class="confirm-dialog">
+    <dialog id="oauth-confirm-dialog" class="dialog">
       <form method="dialog">
         <h2 id="oauth-confirm-title">确认操作</h2>
         <p id="oauth-confirm-summary"></p>
         <div class="dialog-actions">
-          <button class="button button-quiet" value="cancel">取消</button>
-          <button id="oauth-confirm-action" class="button button-danger" value="confirm">确认</button>
+          <button class="button button-secondary" value="cancel">取消</button>
+          <button id="oauth-confirm-action" class="button button-primary" value="confirm">确认</button>
         </div>
       </form>
     </dialog>
 
-    <dialog id="oauth-secret-dialog" class="confirm-dialog secret-dialog">
+    <dialog id="oauth-secret-dialog" class="dialog">
       <form method="dialog">
         <h2 id="oauth-secret-title">新 Client Secret</h2>
-        <p>关闭后页面不会再次显示该密钥。</p>
+        <p>关闭后页面不会再次显示，请立即复制保存。</p>
         <label class="secret-field">
           <span id="oauth-secret-label">Client Secret</span>
           <input id="oauth-secret-value" type="text" readonly spellcheck="false" />
         </label>
         <div class="dialog-actions">
-          <button id="copy-oauth-secret" class="button button-quiet" type="button">复制</button>
-          <button class="button button-primary" value="close">关闭</button>
+          <button id="copy-oauth-secret" class="button button-secondary" type="button">复制</button>
+          <button class="button button-primary" value="close">完成</button>
         </div>
       </form>
     </dialog>

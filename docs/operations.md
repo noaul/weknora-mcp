@@ -72,6 +72,18 @@ The console can edit OAuth settings, access type, capabilities, knowledge-base
 scope, and default knowledge base. API Key and tenant-member management remain
 unavailable because the reviewed official MCP exposes no corresponding tools.
 
+## Login theme
+
+`deploy/keycloak/themes/weknora` is a Keycloak login theme that layers a
+ChatGPT-style stylesheet and Chinese messages on the stock `keycloak.v2`
+templates. `keycloak-compose.yml` mounts it read-only into the Keycloak
+container and `configure-keycloak.sh` selects it with `loginTheme=weknora`. The
+same login page is used by the console and by the ChatGPT/Claude OAuth flows.
+
+Keycloak caches themes in production mode, so recreate the Keycloak container
+after changing theme files. To roll back, set the realm login theme to
+`keycloak.v2` in the admin console or with `kcadm.sh`.
+
 ## Import directory
 
 Create `/var/lib/weknora-mcp-import` as `root:weknora-import` mode `0750`. Add

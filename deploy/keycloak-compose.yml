@@ -44,6 +44,8 @@ services:
       KC_METRICS_ENABLED: "false"
     ports:
       - "127.0.0.1:18195:8080"
+    volumes:
+      - ./keycloak/themes/weknora:/opt/keycloak/themes/weknora:ro
     networks:
       keycloak-private:
         ipv4_address: 10.254.250.3

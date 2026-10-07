@@ -41,7 +41,7 @@ const LIST_ALLOWED_TOOL: Tool = {
   name: "list_allowed_knowledge_bases",
   title: "List allowed WeKnora knowledge bases",
   description:
-    "List the knowledge bases available to this OAuth client and identify the default.",
+    "List the knowledge bases available to this client and identify the default. Pass a knowledge base's complete id or exact name to other tools.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -109,8 +109,8 @@ function downstreamTool(tool: Tool): Tool {
       ...(inputSchema.properties ?? {}),
       kb_id: {
         type: "string",
-        format: "uuid",
-        description: "Allowed knowledge base UUID. Omit to use the configured default.",
+        description:
+          "Full knowledge base id or exact name from list_allowed_knowledge_bases. Omit to use the configured default.",
       },
     };
   }
@@ -170,41 +170,56 @@ function findKnowledgeBaseId(value: unknown): string | undefined {
   return undefined;
 }
 
-function extractKnowledgeBases(value: unknown): Array<{ id: string; name: string }> {
-  const candidates: unknown[] = [];
-  if (Array.isArray(value)) candidates.push(value);
+/** Flattens owned (`{id, name}`) and shared (`{knowledge_base: {id, name}}`) list entries. */
+function knowledgeBaseEntries(value: unknown): Array<{ id: string; name: string }> {
   const record = objectRecord(value);
-  if (record) {
-    candidates.push(record.data, record.knowledge_bases, record.knowledgeBases);
-    const data = objectRecord(record.data);
-    if (data) candidates.push(data.items, data.knowledge_bases, data.knowledgeBases);
+  let data: unknown = record ? (record.data ?? record) : value;
+  const dataRecord = objectRecord(data);
+  if (dataRecord) {
+    data = dataRecord.items ?? dataRecord.list ?? dataRecord.knowledge_bases ?? [];
   }
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) continue;
-    const knowledgeBases = candidate.flatMap((item) => {
-      const entry = objectRecord(item);
-      if (!entry || typeof entry.id !== "string" || typeof entry.name !== "string") {
-        return [];
-      }
-      return [{ id: entry.id, name: entry.name }];
+  if (!Array.isArray(data)) {
+    throw new PolicyError("Upstream knowledge-base list cannot be inspected");
+  }
+  return data.flatMap((item) => {
+    const entry = objectRecord(objectRecord(item)?.knowledge_base) ?? objectRecord(item);
+    return entry && typeof entry.id === "string" && typeof entry.name === "string"
+      ? [{ id: entry.id, name: entry.name }]
+      : [];
+  });
+}
+
+async function knownKnowledgeBases(
+  client: ClientAccessPolicy,
+  upstream: ToolCaller,
+): Promise<Array<{ id: string; name: string }>> {
+  if (client.accessType !== "full" && client.knowledgeBaseScope === "selected") {
+    return client.knowledgeBases;
+  }
+  const owned = knowledgeBaseEntries(
+    parseResultJson(await upstream.callTool({ name: "list_knowledge_bases", arguments: {} })),
+  );
+  let shared: Array<{ id: string; name: string }> = [];
+  try {
+    const result = await upstream.callTool({
+      name: "list_shared_knowledge_bases",
+      arguments: {},
     });
-    if (knowledgeBases.length > 0) return knowledgeBases;
+    if (!result.isError) shared = knowledgeBaseEntries(parseResultJson(result));
+  } catch {
+    // Shared knowledge bases are optional; owned ones still resolve.
   }
-  throw new PolicyError("Upstream knowledge-base list cannot be inspected");
+  const byId = new Map(
+    [...owned, ...shared].map((knowledgeBase) => [knowledgeBase.id, knowledgeBase]),
+  );
+  return [...byId.values()];
 }
 
 async function listAllowedKnowledgeBases(
   client: ClientAccessPolicy,
   upstream: ToolCaller,
 ): Promise<CallToolResult> {
-  let knowledgeBases = client.knowledgeBases;
-  if (client.accessType === "full" || client.knowledgeBaseScope === "all") {
-    const result = await upstream.callTool({
-      name: "list_knowledge_bases",
-      arguments: {},
-    });
-    knowledgeBases = extractKnowledgeBases(parseResultJson(result));
-  }
+  const knowledgeBases = await knownKnowledgeBases(client, upstream);
   return {
     content: [
       {
@@ -217,6 +232,72 @@ async function listAllowedKnowledgeBases(
       },
     ],
   };
+}
+
+/**
+ * Resolves a model-supplied knowledge base reference to a real id. Models
+ * sometimes pass a name or a partly invented UUID; rejecting those here gives
+ * them an actionable error instead of an opaque upstream 404.
+ */
+function resolveKnowledgeBase(
+  reference: string,
+  knowledgeBases: Array<{ id: string; name: string }>,
+): string {
+  const value = reference.trim();
+  const byId = knowledgeBases.find(({ id }) => id === value.toLowerCase());
+  if (byId) return byId.id;
+  const byName = knowledgeBases.filter(
+    ({ name }) => name.trim().toLowerCase() === value.toLowerCase(),
+  );
+  if (byName.length === 1) return byName[0]!.id;
+
+  const prefix = value.toLowerCase().slice(0, 8);
+  const similar = knowledgeBases.filter(
+    ({ id, name }) =>
+      (prefix.length === 8 && id.startsWith(prefix)) ||
+      (value.length > 0 && name.toLowerCase().includes(value.toLowerCase())),
+  );
+  const hint =
+    similar.length > 0
+      ? ` Did you mean ${similar.map(({ id, name }) => `${id} (${name})`).join(", ")}?`
+      : "";
+  throw new PolicyError(
+    `Knowledge base ${value} does not exist or is not allowed. Call list_allowed_knowledge_bases and pass the complete id or exact name.${hint}`,
+  );
+}
+
+async function resolveKnowledgeBaseArguments(
+  client: ClientAccessPolicy,
+  name: string,
+  rule: ToolAccessRule,
+  args: Record<string, unknown>,
+  upstream: ToolCaller,
+): Promise<Record<string, unknown>> {
+  const kbArgument = RETRIEVAL_TOOL_NAMES.has(name)
+    ? "kb_id"
+    : rule.kind === "capability"
+      ? rule.kbArgument
+      : name === "get_knowledge_base" || name === "delete_knowledge_base"
+        ? "kb_id"
+        : undefined;
+  const value = kbArgument ? args[kbArgument] : undefined;
+  if (kbArgument === "kb_id" && typeof value === "string") {
+    const known = await knownKnowledgeBases(client, upstream);
+    return { ...args, kb_id: resolveKnowledgeBase(value, known) };
+  }
+  if (
+    kbArgument === "knowledge_base_ids" &&
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === "string")
+  ) {
+    const known = await knownKnowledgeBases(client, upstream);
+    return {
+      ...args,
+      knowledge_base_ids: (value as string[]).map((item) => resolveKnowledgeBase(item, known)),
+    };
+  }
+  return args;
 }
 
 function assertKnowledgeBaseArguments(
@@ -332,7 +413,7 @@ export function createUnifiedGatewayMcpServer(
     try {
       const client = findClient(await options.policy.read(), options.clientId);
       const name = request.params.name;
-      const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+      const rawArgs = (request.params.arguments ?? {}) as Record<string, unknown>;
       if (name === LIST_ALLOWED_TOOL.name) {
         return await listAllowedKnowledgeBases(client, options.upstream);
       }
@@ -343,6 +424,13 @@ export function createUnifiedGatewayMcpServer(
       if (!hasCapabilities(client, rule)) {
         throw new PolicyError(`Tool ${name} is not allowed for this OAuth client`);
       }
+      const args = await resolveKnowledgeBaseArguments(
+        client,
+        name,
+        rule,
+        rawArgs,
+        options.upstream,
+      );
 
       if (RETRIEVAL_TOOL_NAMES.has(name)) {
         const requestedKbId = typeof args.kb_id === "string" ? args.kb_id : undefined;

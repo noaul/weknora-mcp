@@ -1,11 +1,13 @@
 const CAPABILITY_LABELS = {
-  "knowledge.read": "读取与检索",
-  "conversation.use": "对话与会话",
-  "knowledge.write": "导入与新建知识",
-  "knowledge.manage": "删除与管理知识",
-  "agents.read": "Agent 查询",
-  "models.manage": "模型配置",
+  "knowledge.read": ["读取与检索", "知识库读取、混合检索、Wiki 和文档查询"],
+  "conversation.use": ["对话与会话", "创建会话、对话和管理自己创建的会话"],
+  "knowledge.write": ["导入与新建知识", "从文件、URL 或文本导入和更新知识"],
+  "knowledge.manage": ["删除与管理知识", "创建、删除和管理知识库"],
+  "agents.read": ["Agent 查询", "读取 Agent 并以 Agent 对话"],
+  "models.manage": ["模型配置", "读取与配置模型"],
 };
+
+const UNSUPPORTED_CAPABILITIES = ["API Key 管理", "租户成员管理"];
 
 const state = {
   session: null,
@@ -13,14 +15,23 @@ const state = {
   clients: [],
   capabilities: [],
   drafts: new Map(),
+  view: "overview",
   pendingAction: null,
+  pendingCancel: null,
 };
 
 const elements = {
+  shell: document.querySelector(".shell"),
   user: document.querySelector("#current-user"),
+  avatar: document.querySelector("#account-avatar"),
   list: document.querySelector("#oauth-client-list"),
   empty: document.querySelector("#oauth-empty-state"),
+  navOverview: document.querySelector("#nav-overview"),
   refresh: document.querySelector("#refresh-oauth-clients"),
+  title: document.querySelector("#view-title"),
+  overviewView: document.querySelector("#overview-view"),
+  clientView: document.querySelector("#client-view"),
+  overviewClients: document.querySelector("#overview-clients"),
   enabledCount: document.querySelector("#oauth-enabled-count"),
   sessionCount: document.querySelector("#oauth-session-count"),
   services: document.querySelector("#service-status"),
@@ -28,6 +39,9 @@ const elements = {
   audit: document.querySelector("#audit-list"),
   toast: document.querySelector("#app-status"),
   logout: document.querySelector("#logout"),
+  openSidebar: document.querySelector("#open-sidebar"),
+  closeSidebar: document.querySelector("#close-sidebar"),
+  scrim: document.querySelector("#sidebar-scrim"),
   confirmDialog: document.querySelector("#oauth-confirm-dialog"),
   confirmTitle: document.querySelector("#oauth-confirm-title"),
   confirmSummary: document.querySelector("#oauth-confirm-summary"),
@@ -37,6 +51,11 @@ const elements = {
   secretTitle: document.querySelector("#oauth-secret-title"),
   secretLabel: document.querySelector("#oauth-secret-label"),
   copySecret: document.querySelector("#copy-oauth-secret"),
+};
+
+const ICONS = {
+  copy: "M9 9h10v10H9zM5 15V5h10",
+  chevron: "M9 6l6 6-6 6",
 };
 
 async function request(path, options = {}) {
@@ -77,25 +96,108 @@ function formatDate(value) {
       }).format(date);
 }
 
-function appendText(parent, tag, className, value) {
+function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  node.textContent = value;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function appendText(parent, tag, className, value) {
+  const node = el(tag, className, value);
   parent.append(node);
   return node;
 }
 
-function appendField(parent, label, value) {
-  const field = document.createElement("div");
-  field.className = "oauth-field";
-  appendText(field, "span", "", label);
-  appendText(field, "code", "", value || "-");
-  parent.append(field);
+function icon(path) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
+  return svg;
+}
+
+function button(label, variant = "secondary", onClick) {
+  const node = el("button", `button button-${variant}`, label);
+  node.type = "button";
+  if (onClick) node.addEventListener("click", onClick);
+  return node;
+}
+
+function clientInitial(client) {
+  return { ChatGPT: "G", Claude: "C", Xiaomi: "米" }[client.provider] || client.label.slice(0, 1);
+}
+
+function clientAvatar(client, large = false) {
+  return el("span", `client-avatar${large ? " large" : ""}`, clientInitial(client));
+}
+
+function isToken(client) {
+  return client.kind === "token";
+}
+
+function secretName(client) {
+  return isToken(client) ? "Auth Token" : "Client Secret";
+}
+
+/* Settings rows */
+
+function group(title, note) {
+  const section = el("section", "group");
+  const heading = el("div", "group-heading");
+  appendText(heading, "h2", "", title);
+  if (note) appendText(heading, "span", "muted", note);
+  const body = el("div", "group-body");
+  section.append(heading, body);
+  return { section, body };
+}
+
+function row(title, description, trailing, className = "") {
+  const node = el("div", `row ${className}`.trim());
+  const main = el("div", "row-main");
+  appendText(main, "span", "row-title", title);
+  if (description) appendText(main, "span", "row-description", description);
+  node.append(main);
+  if (trailing) node.append(trailing);
+  return node;
+}
+
+function valueRow(title, value, copyable = false) {
+  const node = el("div", "row wrap-mobile");
+  const main = el("div", "row-main");
+  appendText(main, "span", "row-title", title);
+  appendText(main, "span", "row-value", value || "-");
+  node.append(main);
+  if (copyable && value) {
+    const copy = el("button", "icon-button copy-button");
+    copy.type = "button";
+    copy.setAttribute("aria-label", `复制 ${title}`);
+    copy.append(icon(ICONS.copy));
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(value);
+      showStatus(`${title} 已复制`);
+    });
+    node.append(copy);
+  }
+  return node;
+}
+
+function switchControl(checked, label, disabled, onChange) {
+  const control = el("label", "switch");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = checked;
+  input.disabled = disabled;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("change", () => onChange(input.checked, input));
+  control.append(input, el("span", "switch-track"));
+  return control;
 }
 
 function createSegment(name, value, label, checked, disabled, onChange) {
-  const control = document.createElement("label");
-  control.className = "segment";
+  const control = el("label", "segment");
   const input = document.createElement("input");
   input.type = "radio";
   input.name = name;
@@ -110,9 +212,10 @@ function createSegment(name, value, label, checked, disabled, onChange) {
   return control;
 }
 
+/* Drafts */
+
 function initialDraft(client) {
   return {
-    enabled: client.enabled,
     redirectUri: client.redirectUri,
     accessType: client.access.accessType,
     capabilities: new Set(client.access.capabilities),
@@ -129,53 +232,23 @@ function draftFor(client) {
   return state.drafts.get(client.key);
 }
 
-function renderServiceStatus() {
-  elements.services.replaceChildren();
-  const status = state.overview?.services?.gateway;
-  const item = document.createElement("div");
-  item.className = "service-item";
-  appendText(item, "span", "service-name", "MCP 网关");
-  appendText(
-    item,
-    "span",
-    `status-label ${status === "healthy" ? "healthy" : ""}`,
-    status === "healthy" ? "正常" : "不可用",
+function policyPayload(draft) {
+  const full = draft.accessType === "full";
+  return {
+    accessType: draft.accessType,
+    capabilities: full ? [] : [...draft.capabilities].sort(),
+    knowledgeBaseScope: full ? "all" : draft.knowledgeBaseScope,
+    defaultKbId: draft.defaultKbId,
+    allowedKbIds:
+      full || draft.knowledgeBaseScope === "all" ? [] : [...draft.allowedKbIds].sort(),
+  };
+}
+
+function policyIsDirty(client, draft) {
+  return (
+    JSON.stringify(policyPayload(draft)) !==
+    JSON.stringify(policyPayload(initialDraft(client)))
   );
-  elements.services.append(item);
-  elements.updated.textContent = `更新 ${new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date())}`;
-}
-
-function renderAudit() {
-  elements.audit.replaceChildren();
-  const audit = state.overview?.audit || [];
-  if (!audit.length) appendText(elements.audit, "li", "muted", "暂无变更记录");
-  for (const record of audit) {
-    const item = document.createElement("li");
-    item.className = "audit-item";
-    appendText(
-      item,
-      "strong",
-      "",
-      record.actor?.username || record.actor || record.updatedBy || "管理员",
-    );
-    appendText(
-      item,
-      "span",
-      "",
-      `${record.action || "策略更新"} · ${formatDate(record.timestamp)}`,
-    );
-    elements.audit.append(item);
-  }
-}
-
-function renderSummary() {
-  const enabled = state.clients.filter((client) => client.enabled).length;
-  const sessions = state.clients.reduce((sum, client) => sum + client.sessionCount, 0);
-  elements.enabledCount.textContent = `${enabled} / ${state.clients.length}`;
-  elements.sessionCount.textContent = String(sessions);
 }
 
 function policyIsValid(draft) {
@@ -188,253 +261,56 @@ function policyIsValid(draft) {
   );
 }
 
-function renderCapabilityControls(parent, client, draft) {
-  const section = document.createElement("section");
-  section.className = "client-section";
-  const heading = document.createElement("div");
-  heading.className = "section-title-row";
-  appendText(heading, "h3", "", "MCP 权限");
-  appendText(
-    heading,
-    "span",
-    draft.accessType === "full" ? "section-note full-warning" : "section-note",
-    draft.accessType === "full" ? "可调用全部已审核官方工具" : "仅暴露已勾选能力对应的工具",
-  );
-  section.append(heading);
+/* Actions */
 
-  const modes = document.createElement("div");
-  modes.className = "segmented-control";
-  modes.append(
-    createSegment(
-      `${client.key}-access-type`,
-      "capabilities",
-      "按能力授权",
-      draft.accessType === "capabilities",
-      false,
-      () => {
-        draft.accessType = "capabilities";
-        if (draft.capabilities.size === 0) draft.capabilities.add("knowledge.read");
-        renderClients();
-      },
-    ),
-    createSegment(
-      `${client.key}-access-type`,
-      "full",
-      "全权限",
-      draft.accessType === "full",
-      false,
-      () => {
-        draft.accessType = "full";
-        draft.knowledgeBaseScope = "all";
-        renderClients();
-      },
-    ),
-  );
-  section.append(modes);
-
-  const capabilityGrid = document.createElement("div");
-  capabilityGrid.className = "capability-grid";
-  for (const capability of state.capabilities) {
-    const option = document.createElement("label");
-    option.className = "capability-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = draft.capabilities.has(capability);
-    input.disabled = draft.accessType === "full";
-    input.setAttribute("aria-label", `${client.label} ${CAPABILITY_LABELS[capability] || capability}`);
-    input.addEventListener("change", () => {
-      if (input.checked) draft.capabilities.add(capability);
-      else draft.capabilities.delete(capability);
-      renderClients();
-    });
-    const text = document.createElement("span");
-    appendText(text, "strong", "", CAPABILITY_LABELS[capability] || capability);
-    appendText(text, "code", "", capability);
-    option.append(input, text);
-    capabilityGrid.append(option);
-  }
-  section.append(capabilityGrid);
-
-  const unsupported = document.createElement("div");
-  unsupported.className = "unsupported-options";
-  for (const label of ["API Key 管理", "租户成员管理"]) {
-    const option = document.createElement("label");
-    option.className = "unsupported-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.disabled = true;
-    const text = document.createElement("span");
-    appendText(text, "strong", "", label);
-    appendText(text, "span", "", "当前官方 MCP 无对应工具");
-    option.append(input, text);
-    unsupported.append(option);
-  }
-  section.append(unsupported);
-  parent.append(section);
-}
-
-function renderKnowledgeControls(parent, client, draft) {
-  const section = document.createElement("section");
-  section.className = "client-section";
-  const heading = document.createElement("div");
-  heading.className = "section-title-row";
-  appendText(heading, "h3", "", "知识库范围");
-  appendText(
-    heading,
-    "span",
-    "section-note",
-    draft.accessType === "full" || draft.knowledgeBaseScope === "all"
-      ? "全部知识库"
-      : `已选择 ${draft.allowedKbIds.size} 个`,
-  );
-  section.append(heading);
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "knowledge-toolbar";
-  const scope = document.createElement("div");
-  scope.className = "segmented-control";
-  const full = draft.accessType === "full";
-  scope.append(
-    createSegment(
-      `${client.key}-kb-scope`,
-      "selected",
-      "指定知识库",
-      draft.knowledgeBaseScope === "selected",
-      full,
-      () => {
-        draft.knowledgeBaseScope = "selected";
-        if (draft.allowedKbIds.size === 0 && draft.defaultKbId) {
-          draft.allowedKbIds.add(draft.defaultKbId);
-        }
-        renderClients();
-      },
-    ),
-    createSegment(
-      `${client.key}-kb-scope`,
-      "all",
-      "全部知识库",
-      draft.knowledgeBaseScope === "all",
-      full,
-      () => {
-        draft.knowledgeBaseScope = "all";
-        renderClients();
-      },
-    ),
-  );
-  toolbar.append(scope);
-  const defaultLabel = document.createElement("label");
-  appendText(defaultLabel, "span", "field-label", "默认知识库");
-  const defaultSelect = document.createElement("select");
-  defaultSelect.className = "default-select";
-  defaultSelect.setAttribute("aria-label", `${client.label} 默认知识库`);
-  for (const kb of state.overview.knowledgeBases) {
-    const option = document.createElement("option");
-    option.value = kb.id;
-    option.textContent = kb.name;
-    option.selected = kb.id === draft.defaultKbId;
-    defaultSelect.append(option);
-  }
-  defaultSelect.addEventListener("change", () => {
-    draft.defaultKbId = defaultSelect.value;
-    if (draft.knowledgeBaseScope === "selected") {
-      draft.allowedKbIds.add(defaultSelect.value);
-    }
-    renderClients();
-  });
-  defaultLabel.append(defaultSelect);
-  toolbar.append(defaultLabel);
-  section.append(toolbar);
-
-  const list = document.createElement("div");
-  list.className = "knowledge-list";
-  for (const kb of state.overview.knowledgeBases) {
-    const row = document.createElement("div");
-    row.className = "knowledge-row";
-    const allowed = document.createElement("input");
-    allowed.className = "knowledge-check";
-    allowed.type = "checkbox";
-    allowed.checked = full || draft.knowledgeBaseScope === "all" || draft.allowedKbIds.has(kb.id);
-    allowed.disabled = full || draft.knowledgeBaseScope === "all";
-    allowed.setAttribute("aria-label", `${client.label} 允许 ${kb.name}`);
-    allowed.addEventListener("change", () => {
-      if (allowed.checked) draft.allowedKbIds.add(kb.id);
-      else draft.allowedKbIds.delete(kb.id);
-      if (!draft.allowedKbIds.has(draft.defaultKbId)) {
-        draft.defaultKbId = draft.allowedKbIds.values().next().value || "";
-      }
-      renderClients();
-    });
-    const main = document.createElement("div");
-    main.className = "knowledge-main";
-    appendText(main, "span", "knowledge-name", kb.name);
-    appendText(main, "span", "knowledge-id", kb.id);
-    const defaultControl = document.createElement("label");
-    defaultControl.className = "default-control";
-    const radio = document.createElement("input");
-    radio.className = "default-radio";
-    radio.type = "radio";
-    radio.name = `${client.key}-default-kb`;
-    radio.checked = draft.defaultKbId === kb.id;
-    radio.addEventListener("change", () => {
-      draft.defaultKbId = kb.id;
-      if (draft.knowledgeBaseScope === "selected") draft.allowedKbIds.add(kb.id);
-      renderClients();
-    });
-    defaultControl.append(radio, document.createTextNode("默认"));
-    row.append(allowed, main, defaultControl);
-    list.append(row);
-  }
-  section.append(list);
-  parent.append(section);
-}
-
-function confirmAction(title, summary, actionLabel, action) {
+function confirmAction(title, summary, actionLabel, action, options = {}) {
   state.pendingAction = action;
+  state.pendingCancel = options.onCancel || null;
   elements.confirmTitle.textContent = title;
   elements.confirmSummary.textContent = summary;
   elements.confirmAction.textContent = actionLabel;
+  elements.confirmAction.className = `button ${options.danger ? "button-danger" : "button-primary"}`;
   elements.confirmDialog.returnValue = "";
   elements.confirmDialog.showModal();
 }
 
 async function saveAccessPolicy(client, draft) {
-  const full = draft.accessType === "full";
   await request(`/mcp-console/api/oauth-clients/${client.key}/access-policy`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "x-csrf-token": state.session.csrfToken,
     },
-    body: JSON.stringify({
-      accessType: draft.accessType,
-      capabilities: full ? [] : Array.from(draft.capabilities),
-      knowledgeBaseScope: full ? "all" : draft.knowledgeBaseScope,
-      defaultKbId: draft.defaultKbId,
-      allowedKbIds:
-        full || draft.knowledgeBaseScope === "all"
-          ? []
-          : Array.from(draft.allowedKbIds),
-    }),
+    body: JSON.stringify(policyPayload(draft)),
   });
   showStatus(`${client.label} MCP 权限已更新`);
   await loadAll();
 }
 
-async function saveOauthClient(client, draft) {
+async function saveOauthClient(client, update) {
   await request(`/mcp-console/api/oauth-clients/${client.key}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "x-csrf-token": state.session.csrfToken,
     },
-    body: JSON.stringify({ enabled: draft.enabled, redirectUri: draft.redirectUri }),
+    body: JSON.stringify(update),
   });
-  showStatus(`${client.label} OAuth 配置已更新`);
+  showStatus(`${client.label} 连接配置已更新`);
   await loadAll();
 }
 
-function secretName(client) {
-  return client.kind === "token" ? "Auth Token" : "Client Secret";
+async function saveTokenClient(client, enabled) {
+  await request(`/mcp-console/api/oauth-clients/${client.key}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-csrf-token": state.session.csrfToken,
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  showStatus(`${client.label} Token 已${enabled ? "启用" : "停用"}`);
+  await loadAll();
 }
 
 async function rotateSecret(client) {
@@ -450,63 +326,7 @@ async function rotateSecret(client) {
   elements.secretValue.value = result.secret;
   elements.secretDialog.showModal();
   showStatus(`${client.label} ${secretName(client)} 已生成`);
-  if (client.kind === "token") await loadAll();
-}
-
-async function saveTokenClient(client, draft) {
-  await request(`/mcp-console/api/oauth-clients/${client.key}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "x-csrf-token": state.session.csrfToken,
-    },
-    body: JSON.stringify({ enabled: draft.enabled }),
-  });
-  showStatus(`${client.label} Token 已${draft.enabled ? "启用" : "停用"}`);
-  await loadAll();
-}
-
-function renderTokenConnection(card, client, draft) {
-  const connection = document.createElement("section");
-  connection.className = "client-section";
-  const heading = document.createElement("div");
-  heading.className = "section-title-row";
-  appendText(heading, "h3", "", "连接信息");
-  appendText(
-    heading,
-    "span",
-    "section-note",
-    client.hasToken ? `Token 生成于 ${formatDate(client.tokenCreatedAt)}` : "尚未生成 Token",
-  );
-  connection.append(heading);
-  const grid = document.createElement("div");
-  grid.className = "connection-grid";
-  appendField(grid, "服务器 URL", client.mcpUrl);
-  appendField(grid, "认证方式", "静态 Bearer Token");
-  appendField(grid, "Auth Token", client.hasToken ? "已生成（不可再次查看）" : "未生成");
-  appendField(grid, "Provider", client.provider);
-  connection.append(grid);
-  appendText(
-    connection,
-    "p",
-    "muted",
-    "在客户端的 MCP 服务中填写：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
-  );
-  const row = document.createElement("div");
-  row.className = "client-actions";
-  const save = appendText(row, "button", "button button-primary", "保存启用状态");
-  save.type = "button";
-  save.disabled = !client.hasToken;
-  save.addEventListener("click", () =>
-    confirmAction(
-      `更新 ${client.label} 状态`,
-      draft.enabled ? "将启用该 Token。" : "将停用该 Token，客户端请求会被拒绝。",
-      "确认保存",
-      () => saveTokenClient(client, draft),
-    ),
-  );
-  connection.append(row);
-  card.append(connection);
+  if (isToken(client)) await loadAll();
 }
 
 async function revokeSessions(client) {
@@ -518,149 +338,394 @@ async function revokeSessions(client) {
     },
   );
   showStatus(
-    client.kind === "token"
+    isToken(client)
       ? `${client.label} Token 已撤销`
       : `已撤销 ${result.revokedSessions} 个 ${client.label} 会话`,
   );
   await loadAll();
 }
 
-function renderClient(client) {
-  const draft = draftFor(client);
-  const card = document.createElement("article");
-  card.className = "oauth-client";
+/* Navigation */
 
-  const header = document.createElement("header");
-  header.className = "client-header";
-  const title = document.createElement("div");
-  title.className = "client-title";
-  appendText(title, "h2", "", client.label);
-  appendText(title, "code", "", client.clientId);
-  const toggle = document.createElement("label");
-  toggle.className = "oauth-toggle";
-  const enabled = document.createElement("input");
-  enabled.type = "checkbox";
-  enabled.checked = draft.enabled;
-  enabled.setAttribute("aria-label", `启用 ${client.label}`);
-  const enabledText = document.createTextNode(draft.enabled ? "已启用" : "已停用");
-  enabled.addEventListener("change", () => {
-    draft.enabled = enabled.checked;
-    enabledText.textContent = draft.enabled ? "已启用" : "已停用";
-  });
-  toggle.append(enabled, enabledText);
-  enabled.disabled = client.kind === "token" && !client.hasToken;
-  header.append(title, toggle);
-  card.append(header);
+function setSidebar(open) {
+  elements.shell.classList.toggle("sidebar-visible", open);
+  elements.scrim.hidden = !open;
+}
 
-  if (client.kind === "token") {
-    renderTokenConnection(card, client, draft);
-    renderCapabilityControls(card, client, draft);
-    renderKnowledgeControls(card, client, draft);
-    card.append(renderFooter(client, draft));
-    return card;
+function selectView(view) {
+  state.view = state.clients.some(({ key }) => key === view) ? view : "overview";
+  if (window.location.hash.slice(1) !== state.view) {
+    history.replaceState(null, "", `#${state.view}`);
+  }
+  setSidebar(false);
+  render();
+  window.scrollTo({ top: 0 });
+}
+
+function renderNav() {
+  elements.list.replaceChildren();
+  elements.empty.hidden = state.clients.length > 0;
+  if (state.view === "overview") elements.navOverview.setAttribute("aria-current", "page");
+  else elements.navOverview.removeAttribute("aria-current");
+  for (const client of state.clients) {
+    const item = el("button", "nav-item");
+    item.type = "button";
+    if (state.view === client.key) item.setAttribute("aria-current", "page");
+    item.append(clientAvatar(client), el("span", "nav-name", client.label));
+    const dot = el("span", `status-dot${client.enabled ? " on" : ""}`);
+    dot.title = client.enabled ? "已启用" : "已停用";
+    item.append(dot);
+    item.addEventListener("click", () => selectView(client.key));
+    elements.list.append(item);
+  }
+}
+
+/* Overview */
+
+function clientStatusBadge(client) {
+  if (isToken(client) && !client.hasToken) return el("span", "badge warn", "未生成 Token");
+  return client.enabled
+    ? el("span", "badge ok", "已启用")
+    : el("span", "badge off", "已停用");
+}
+
+function accessSummary(client) {
+  const access = client.access;
+  const mode =
+    access.accessType === "full" ? "全权限" : `按能力授权 · ${access.capabilities.length} 项能力`;
+  const scope =
+    access.accessType === "full" || access.knowledgeBaseScope === "all"
+      ? "全部知识库"
+      : `${access.knowledgeBases.length} 个知识库`;
+  return `${mode} · ${scope}`;
+}
+
+function renderOverview() {
+  const enabled = state.clients.filter((client) => client.enabled).length;
+  const sessions = state.clients.reduce((sum, client) => sum + client.sessionCount, 0);
+  elements.enabledCount.textContent = `${enabled} / ${state.clients.length}`;
+  elements.sessionCount.textContent = String(sessions);
+
+  elements.services.replaceChildren();
+  const status = state.overview?.services?.gateway;
+  elements.services.append(
+    row(
+      "MCP 网关",
+      "统一 /mcp 入口与权限检查",
+      status === "healthy"
+        ? el("span", "badge ok", "正常")
+        : el("span", "badge off", "不可用"),
+    ),
+  );
+  elements.updated.textContent = `更新于 ${new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date())}`;
+
+  elements.overviewClients.replaceChildren();
+  for (const client of state.clients) {
+    const node = el("div", "row clickable");
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    const main = el("div", "row-main");
+    appendText(main, "span", "row-title", client.label);
+    appendText(main, "span", "row-description", accessSummary(client));
+    const chevron = el("span", "chevron");
+    chevron.append(icon(ICONS.chevron));
+    node.append(clientAvatar(client), main, clientStatusBadge(client), chevron);
+    node.addEventListener("click", () => selectView(client.key));
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectView(client.key);
+      }
+    });
+    elements.overviewClients.append(node);
   }
 
-  const connection = document.createElement("section");
-  connection.className = "client-section";
-  const connectionHeading = document.createElement("div");
-  connectionHeading.className = "section-title-row";
-  appendText(connectionHeading, "h3", "", "连接信息");
-  appendText(connectionHeading, "span", "section-note", `活跃会话 ${client.sessionCount} 个`);
-  connection.append(connectionHeading);
-  const grid = document.createElement("div");
-  grid.className = "connection-grid";
-  appendField(grid, "MCP URL", client.mcpUrl);
-  appendField(grid, "Scope", client.scope);
-  appendField(grid, "Issuer", client.issuer);
-  appendField(grid, "Authorization URL", client.authorizationEndpoint);
-  appendField(grid, "Token URL", client.tokenEndpoint);
-  appendField(grid, "Provider", client.provider);
-  connection.append(grid);
-  const redirectRow = document.createElement("div");
-  redirectRow.className = "redirect-row";
-  const redirectLabel = document.createElement("label");
-  redirectLabel.className = "redirect-field";
-  appendText(redirectLabel, "span", "field-label", "回调 URL");
+  elements.audit.replaceChildren();
+  const audit = state.overview?.audit || [];
+  if (!audit.length) {
+    const empty = el("li", "row");
+    appendText(empty, "span", "muted", "暂无变更记录");
+    elements.audit.append(empty);
+  }
+  for (const record of audit) {
+    const item = el("li", "row");
+    const main = el("div", "row-main");
+    appendText(main, "span", "row-title", record.action || "策略更新");
+    appendText(
+      main,
+      "span",
+      "row-description",
+      record.actor?.username || record.actor || record.updatedBy || "管理员",
+    );
+    item.append(main, el("span", "muted", formatDate(record.timestamp)));
+    elements.audit.append(item);
+  }
+}
+
+/* Client detail */
+
+function renderHero(parent, client) {
+  const hero = el("div", "client-hero");
+  const text = el("div", "client-hero-text");
+  appendText(text, "h2", "", client.label);
+  appendText(text, "code", "", client.clientId);
+  const canToggle = !isToken(client) || client.hasToken;
+  const toggle = switchControl(
+    client.enabled,
+    `启用 ${client.label}`,
+    !canToggle,
+    (checked, input) => {
+      const restore = () => {
+        input.checked = client.enabled;
+      };
+      if (isToken(client)) {
+        confirmAction(
+          `${checked ? "启用" : "停用"} ${client.label}`,
+          checked ? "该 Token 将重新可用。" : "停用后使用该 Token 的请求会被拒绝。",
+          checked ? "确认启用" : "确认停用",
+          () => saveTokenClient(client, checked),
+          { danger: !checked, onCancel: restore },
+        );
+      } else {
+        confirmAction(
+          `${checked ? "启用" : "停用"} ${client.label}`,
+          checked ? "客户端将可以重新发起 OAuth 登录。" : "将停用客户端并阻止新的 OAuth 登录。",
+          checked ? "确认启用" : "确认停用",
+          () => saveOauthClient(client, { enabled: checked, redirectUri: client.redirectUri }),
+          { danger: !checked, onCancel: restore },
+        );
+      }
+    },
+  );
+  hero.append(clientAvatar(client, true), text, clientStatusBadge(client), toggle);
+  parent.append(hero);
+}
+
+function renderOauthConnection(parent, client, draft) {
+  const { section, body } = group("连接信息", `活跃会话 ${client.sessionCount} 个`);
+  body.append(
+    valueRow("MCP URL", client.mcpUrl, true),
+    valueRow("Client ID", client.clientId, true),
+    valueRow("Scope", client.scope, true),
+    valueRow("Issuer", client.issuer),
+    valueRow("Authorization URL", client.authorizationEndpoint),
+    valueRow("Token URL", client.tokenEndpoint),
+  );
+  const redirectRow = el("div", "row row-stack");
+  const main = el("div", "row-main");
+  appendText(main, "span", "row-title", "回调 URL");
+  appendText(main, "span", "row-description", "必须与 ChatGPT 或 Claude 页面显示的地址完全一致");
   const redirect = document.createElement("input");
+  redirect.className = "text-input";
   redirect.type = "url";
   redirect.required = true;
   redirect.spellcheck = false;
   redirect.value = draft.redirectUri;
   redirect.setAttribute("aria-label", `${client.label} 回调 URL`);
-  redirect.addEventListener("input", () => {
-    draft.redirectUri = redirect.value;
-  });
-  redirectLabel.append(redirect);
-  const saveOauth = appendText(redirectRow, "button", "button button-primary", "保存连接");
-  saveOauth.type = "button";
-  saveOauth.addEventListener("click", () => {
+  const save = button("保存", "primary", () => {
     if (!redirect.reportValidity()) return;
     confirmAction(
-      `更新 ${client.label} 连接`,
-      draft.enabled
-        ? "将保存启用状态和精确回调 URL。"
-        : "将停用客户端并阻止新的 OAuth 登录。",
+      `更新 ${client.label} 回调 URL`,
+      "将保存新的精确回调 URL。",
       "确认保存",
-      () => saveOauthClient(client, draft),
+      () => saveOauthClient(client, { enabled: client.enabled, redirectUri: draft.redirectUri }),
     );
   });
-  redirectRow.prepend(redirectLabel);
-  connection.append(redirectRow);
-  card.append(connection);
-
-  renderCapabilityControls(card, client, draft);
-  renderKnowledgeControls(card, client, draft);
-  card.append(renderFooter(client, draft));
-  return card;
+  save.disabled = draft.redirectUri === client.redirectUri;
+  redirect.addEventListener("input", () => {
+    draft.redirectUri = redirect.value;
+    save.disabled = redirect.value === client.redirectUri;
+  });
+  redirectRow.append(main, redirect, save);
+  body.append(redirectRow);
+  parent.append(section);
 }
 
-function renderFooter(client, draft) {
-  const token = client.kind === "token";
-  const footer = document.createElement("footer");
-  footer.className = "client-footer";
+function renderTokenConnection(parent, client) {
+  const { section, body } = group(
+    "连接信息",
+    client.hasToken ? `Token 生成于 ${formatDate(client.tokenCreatedAt)}` : "尚未生成 Token",
+  );
+  body.append(
+    valueRow("服务器 URL", client.mcpUrl, true),
+    row("认证方式", "静态 Bearer Token，不需要 OAuth 登录"),
+    row(
+      "Auth Token",
+      client.hasToken ? "已生成，出于安全原因不可再次查看" : "生成后只显示一次",
+      client.hasToken
+        ? el("span", "badge ok", "已生成")
+        : el("span", "badge warn", "未生成"),
+    ),
+  );
+  parent.append(section);
   appendText(
-    footer,
-    "span",
-    "session-count",
-    draft.accessType === "full" ? "全权限模式" : `${draft.capabilities.size} 项能力`,
+    parent,
+    "div",
+    "callout",
+    "在手机的「MCP 服务」中添加：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
   );
-  const actions = document.createElement("div");
-  actions.className = "client-actions";
-  const savePolicy = appendText(actions, "button", "button button-primary", "应用 MCP 权限");
-  savePolicy.type = "button";
-  savePolicy.disabled = !policyIsValid(draft);
-  savePolicy.addEventListener("click", () =>
-    confirmAction(
-      `更新 ${client.label} MCP 权限`,
-      draft.accessType === "full"
-        ? "该客户端将可调用全部已审核官方工具并访问全部知识库。"
-        : `该客户端将启用 ${draft.capabilities.size} 项能力。`,
-      "确认应用",
-      () => saveAccessPolicy(client, draft),
-    ),
+}
+
+function renderCapabilityControls(parent, client, draft) {
+  const full = draft.accessType === "full";
+  const { section, body } = group(
+    "MCP 权限",
+    full ? "可调用全部已审核官方工具" : "仅暴露已开启能力对应的工具",
   );
+  const modes = el("div", "segmented-control");
+  modes.append(
+    createSegment(`${client.key}-access-type`, "capabilities", "按能力授权", !full, false, () => {
+      draft.accessType = "capabilities";
+      if (draft.capabilities.size === 0) draft.capabilities.add("knowledge.read");
+      render();
+    }),
+    createSegment(`${client.key}-access-type`, "full", "全权限", full, false, () => {
+      draft.accessType = "full";
+      draft.knowledgeBaseScope = "all";
+      render();
+    }),
+  );
+  body.append(
+    row("授权方式", full ? "包含写入、删除与管理操作" : "按能力组逐项开启", modes, "wrap-mobile"),
+  );
+  for (const capability of state.capabilities) {
+    const [label, description] = CAPABILITY_LABELS[capability] || [capability, ""];
+    body.append(
+      row(
+        label,
+        `${description} · ${capability}`,
+        switchControl(
+          full || draft.capabilities.has(capability),
+          `${client.label} ${label}`,
+          full,
+          (checked) => {
+            if (checked) draft.capabilities.add(capability);
+            else draft.capabilities.delete(capability);
+            render();
+          },
+        ),
+        full ? "disabled" : "",
+      ),
+    );
+  }
+  for (const label of UNSUPPORTED_CAPABILITIES) {
+    body.append(
+      row(label, "当前官方 MCP 无对应工具", switchControl(false, label, true, () => {}), "disabled"),
+    );
+  }
+  parent.append(section);
+  if (full) {
+    appendText(
+      parent,
+      "div",
+      "callout warning",
+      "全权限会开放写入、删除和管理类工具，并允许访问全部知识库，只应授予可信客户端。",
+    );
+  }
+}
+
+function renderKnowledgeControls(parent, client, draft) {
+  const full = draft.accessType === "full";
+  const allScope = full || draft.knowledgeBaseScope === "all";
+  const { section, body } = group(
+    "知识库范围",
+    allScope ? "全部知识库" : `已选择 ${draft.allowedKbIds.size} 个`,
+  );
+  const scope = el("div", "segmented-control");
+  scope.append(
+    createSegment(`${client.key}-kb-scope`, "selected", "指定知识库", !allScope, full, () => {
+      draft.knowledgeBaseScope = "selected";
+      if (draft.allowedKbIds.size === 0 && draft.defaultKbId) {
+        draft.allowedKbIds.add(draft.defaultKbId);
+      }
+      render();
+    }),
+    createSegment(`${client.key}-kb-scope`, "all", "全部知识库", allScope, full, () => {
+      draft.knowledgeBaseScope = "all";
+      render();
+    }),
+  );
+  body.append(row("访问范围", "限制检索和写入可触达的知识库", scope, "wrap-mobile"));
+
+  const defaultSelect = el("select", "select");
+  defaultSelect.style.maxWidth = "240px";
+  defaultSelect.setAttribute("aria-label", `${client.label} 默认知识库`);
+  for (const kb of state.overview.knowledgeBases) {
+    const option = el("option", "", kb.name);
+    option.value = kb.id;
+    option.selected = kb.id === draft.defaultKbId;
+    defaultSelect.append(option);
+  }
+  defaultSelect.addEventListener("change", () => {
+    draft.defaultKbId = defaultSelect.value;
+    if (draft.knowledgeBaseScope === "selected") draft.allowedKbIds.add(defaultSelect.value);
+    render();
+  });
+  body.append(row("默认知识库", "检索工具未指定知识库时使用", defaultSelect, "wrap-mobile"));
+
+  for (const kb of state.overview.knowledgeBases) {
+    const node = el("div", `row knowledge-row${allScope ? " disabled" : ""}`);
+    const allowed = document.createElement("input");
+    allowed.type = "checkbox";
+    allowed.checked = allScope || draft.allowedKbIds.has(kb.id);
+    allowed.disabled = allScope;
+    allowed.setAttribute("aria-label", `${client.label} 允许 ${kb.name}`);
+    allowed.addEventListener("change", () => {
+      if (allowed.checked) draft.allowedKbIds.add(kb.id);
+      else draft.allowedKbIds.delete(kb.id);
+      if (!draft.allowedKbIds.has(draft.defaultKbId)) {
+        draft.defaultKbId = draft.allowedKbIds.values().next().value || "";
+      }
+      render();
+    });
+    const names = el("div", "row-main");
+    appendText(names, "span", "row-title", kb.name);
+    appendText(names, "span", "row-value", kb.id);
+    const defaultControl = el("label", "default-control");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = `${client.key}-default-kb`;
+    radio.checked = draft.defaultKbId === kb.id;
+    radio.addEventListener("change", () => {
+      draft.defaultKbId = kb.id;
+      if (draft.knowledgeBaseScope === "selected") draft.allowedKbIds.add(kb.id);
+      render();
+    });
+    defaultControl.append(radio, document.createTextNode("默认"));
+    node.append(allowed, names, defaultControl);
+    body.append(node);
+  }
+  parent.append(section);
+}
+
+function renderSecurity(parent, client) {
+  const token = isToken(client);
+  const { section, body } = group("安全");
+  section.classList.add("danger-zone");
   const rotateLabel = token ? (client.hasToken ? "轮换 Token" : "生成 Token") : "轮换 Secret";
-  const rotate = appendText(actions, "button", "button button-quiet", rotateLabel);
-  rotate.type = "button";
-  rotate.addEventListener("click", () =>
-    confirmAction(
-      `${rotateLabel}：${client.label}`,
+  body.append(
+    row(
+      rotateLabel,
       token
-        ? "现有 Token（如有）将立即失效，新 Token 只显示一次。"
-        : "现有 Client Secret 将失效，新密钥只显示一次。",
-      "确认生成",
-      () => rotateSecret(client),
+        ? "生成新的 Auth Token，现有 Token 立即失效，新值只显示一次"
+        : "生成新的 Client Secret，现有 Secret 立即失效，新值只显示一次",
+      button(rotateLabel, "secondary", () =>
+        confirmAction(
+          `${rotateLabel}：${client.label}`,
+          token
+            ? "现有 Token（如有）将立即失效，新 Token 只显示一次。"
+            : "现有 Client Secret 将失效，新密钥只显示一次。",
+          "确认生成",
+          () => rotateSecret(client),
+        ),
+      ),
+      "wrap-mobile",
     ),
   );
-  const revoke = appendText(
-    actions,
-    "button",
-    "button button-quiet",
-    token ? "撤销 Token" : "撤销会话",
-  );
-  revoke.type = "button";
-  revoke.disabled = token && !client.hasToken;
-  revoke.addEventListener("click", () =>
+  const revoke = button(token ? "撤销 Token" : "撤销会话", "danger", () =>
     confirmAction(
       token ? `撤销 ${client.label} Token` : `撤销 ${client.label} 会话`,
       token
@@ -668,17 +733,83 @@ function renderFooter(client, draft) {
         : `将撤销当前 ${client.sessionCount} 个活跃会话。`,
       "确认撤销",
       () => revokeSessions(client),
+      { danger: true },
     ),
   );
-  footer.append(actions);
-  return footer;
+  revoke.disabled = token && !client.hasToken;
+  body.append(
+    row(
+      token ? "撤销 Token" : "撤销会话",
+      token ? "删除 Token，客户端立即无法访问" : `撤销 ${client.sessionCount} 个活跃登录会话`,
+      revoke,
+      "wrap-mobile",
+    ),
+  );
+  parent.append(section);
 }
 
-function renderClients() {
-  elements.list.replaceChildren();
-  elements.empty.hidden = state.clients.length > 0;
-  for (const client of state.clients) elements.list.append(renderClient(client));
-  renderSummary();
+function renderSaveBar(parent, client, draft) {
+  const dirty = policyIsDirty(client, draft);
+  const valid = policyIsValid(draft);
+  const bar = el("div", `save-bar${dirty ? "" : " idle"}`);
+  const summary =
+    draft.accessType === "full"
+      ? "全权限模式"
+      : `${draft.capabilities.size} 项能力 · ${
+          draft.knowledgeBaseScope === "all" ? "全部知识库" : `${draft.allowedKbIds.size} 个知识库`
+        }`;
+  appendText(
+    bar,
+    "span",
+    "",
+    !valid ? `${summary} · 配置不完整` : dirty ? `${summary} · 有未保存的更改` : `${summary} · 已保存`,
+  );
+  const actions = el("div", "dialog-actions");
+  actions.style.margin = "0";
+  const reset = button("撤销更改", "ghost", () => {
+    state.drafts.delete(client.key);
+    render();
+  });
+  reset.disabled = !dirty;
+  const savePolicy = button("应用 MCP 权限", "primary", () =>
+    confirmAction(
+      `更新 ${client.label} MCP 权限`,
+      draft.accessType === "full"
+        ? "该客户端将可调用全部已审核官方工具并访问全部知识库。"
+        : `该客户端将启用 ${draft.capabilities.size} 项能力。`,
+      "确认应用",
+      () => saveAccessPolicy(client, draft),
+      { danger: draft.accessType === "full" },
+    ),
+  );
+  savePolicy.disabled = !dirty || !valid;
+  actions.append(reset, savePolicy);
+  bar.append(actions);
+  parent.append(bar);
+}
+
+function renderClientView(client) {
+  const draft = draftFor(client);
+  const view = elements.clientView;
+  view.replaceChildren();
+  renderHero(view, client);
+  if (isToken(client)) renderTokenConnection(view, client);
+  else renderOauthConnection(view, client, draft);
+  renderCapabilityControls(view, client, draft);
+  renderKnowledgeControls(view, client, draft);
+  renderSecurity(view, client);
+  renderSaveBar(view, client, draft);
+}
+
+function render() {
+  renderNav();
+  const client = state.clients.find(({ key }) => key === state.view);
+  elements.overviewView.hidden = Boolean(client);
+  elements.clientView.hidden = !client;
+  elements.title.textContent = client ? client.label : "概览";
+  document.title = client ? `${client.label} · WeKnora MCP 管理` : "WeKnora MCP 管理";
+  if (client) renderClientView(client);
+  else renderOverview();
 }
 
 async function loadAll(showMessage = false) {
@@ -696,9 +827,10 @@ async function loadAll(showMessage = false) {
     state.capabilities = oauth.capabilities;
     state.drafts.clear();
     elements.user.textContent = session.username;
-    renderServiceStatus();
-    renderAudit();
-    renderClients();
+    elements.avatar.textContent = (session.username || "A").slice(0, 1);
+    const requested = window.location.hash.slice(1) || state.view;
+    state.view = state.clients.some(({ key }) => key === requested) ? requested : "overview";
+    render();
     if (showMessage) showStatus("状态已刷新");
   } catch (error) {
     if (error.message !== "authentication_required") {
@@ -710,6 +842,14 @@ async function loadAll(showMessage = false) {
   }
 }
 
+elements.navOverview.addEventListener("click", () => selectView("overview"));
+elements.openSidebar.addEventListener("click", () => setSidebar(true));
+elements.closeSidebar.addEventListener("click", () => setSidebar(false));
+elements.scrim.addEventListener("click", () => setSidebar(false));
+window.addEventListener("hashchange", () => {
+  const view = window.location.hash.slice(1);
+  if (view && view !== state.view) selectView(view);
+});
 elements.refresh.addEventListener("click", () => loadAll(true));
 elements.logout.addEventListener("click", async () => {
   try {
@@ -724,12 +864,18 @@ elements.logout.addEventListener("click", async () => {
 });
 elements.confirmDialog.addEventListener("close", async () => {
   const action = state.pendingAction;
+  const cancel = state.pendingCancel;
   state.pendingAction = null;
-  if (elements.confirmDialog.returnValue !== "confirm" || !action) return;
+  state.pendingCancel = null;
+  if (elements.confirmDialog.returnValue !== "confirm" || !action) {
+    cancel?.();
+    return;
+  }
   elements.confirmAction.disabled = true;
   try {
     await action();
   } catch {
+    cancel?.();
     showStatus("操作失败，请检查服务状态", true);
   } finally {
     elements.confirmAction.disabled = false;

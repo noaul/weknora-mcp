@@ -30,7 +30,17 @@ describe("read-only single-KB tool policy", () => {
     });
   });
 
-  it.each(["kb_id", "knowledge_base_id", "knowledge_base_ids"])(
+  it("never forwards a client-controlled kb_id", () => {
+    expect(
+      prepareUpstreamToolCall(
+        "hybrid_search",
+        { query: "test", kb_id: "attacker-controlled" },
+        kbId,
+      ).arguments.kb_id,
+    ).toBe(kbId);
+  });
+
+  it.each(["knowledge_base_id", "knowledge_base_ids"])(
     "rejects client-controlled %s",
     (field) => {
       expect(() =>

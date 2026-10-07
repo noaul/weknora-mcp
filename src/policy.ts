@@ -12,7 +12,7 @@ export type AllowedToolName = (typeof ALLOWED_TOOL_NAMES)[number];
 const schemas = {
   hybrid_search: z
     .object({
-      kb_id: z.string().uuid().optional(),
+      kb_id: z.string().min(1).optional(),
       query: z.string().min(1),
       vector_threshold: z.number().min(0).max(1).optional(),
       keyword_threshold: z.number().min(0).max(1).optional(),
@@ -21,17 +21,17 @@ const schemas = {
     .strict(),
   wiki_search: z
     .object({
-      kb_id: z.string().uuid().optional(),
+      kb_id: z.string().min(1).optional(),
       query: z.string().min(1),
       limit: z.number().int().min(1).max(100).optional(),
     })
     .strict(),
   wiki_read_page: z
-    .object({ kb_id: z.string().uuid().optional(), slug: z.string().min(1) })
+    .object({ kb_id: z.string().min(1).optional(), slug: z.string().min(1) })
     .strict(),
   wiki_index_view: z
     .object({
-      kb_id: z.string().uuid().optional(),
+      kb_id: z.string().min(1).optional(),
       limit: z.number().int().min(1).max(200).optional(),
     })
     .strict(),
