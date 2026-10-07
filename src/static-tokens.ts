@@ -9,32 +9,28 @@ import { AuthenticationError, type AuthenticatedPrincipal } from "./auth.js";
 /**
  * Clients that cannot run an OAuth flow (the Xiaomi phone MCP settings,
  * LobeHub connectors, Codeg and other coding agents) authenticate with named
- * static API keys. All keys of a token client share its access policy; only
- * each key's SHA-256 hash is stored.
+ * static API keys. Every key is its own access-policy client
+ * (`apikey-<id>`); only each key's SHA-256 hash is stored.
  */
-export interface ManagedTokenClientDefinition {
-  key: string;
-  label: string;
-  provider: "Token";
-  clientId: string;
-  mcpUrl: string;
+export const API_KEY_CLIENT_PREFIX = "apikey-";
+
+export function apiKeyClientId(keyId: string): string {
+  return `${API_KEY_CLIENT_PREFIX}${keyId}`;
 }
 
-export const MANAGED_TOKEN_CLIENTS: ManagedTokenClientDefinition[] = [
-  {
-    key: "api-keys",
-    label: "Key 访问",
-    provider: "Token",
-    clientId: "token-weknora",
-    mcpUrl: "https://wek.uov.me/mcp",
-  },
+/** Former shared token clients whose keys are split into per-key clients. */
+export const LEGACY_TOKEN_CLIENT_IDS = [
+  "token-weknora",
+  "xiaomi-weknora-token",
+  "lobehub-weknora-token",
+  "codeg-weknora-token",
 ];
 
-/** Per-client token clients that were merged into `token-weknora`. */
-export const LEGACY_TOKEN_CLIENTS: Record<string, { clientId: string; keyName: string }> = {
-  "xiaomi-weknora-token": { clientId: "token-weknora", keyName: "小米手机" },
-  "lobehub-weknora-token": { clientId: "token-weknora", keyName: "LobeHub" },
-  "codeg-weknora-token": { clientId: "token-weknora", keyName: "Codeg" },
+/** Version-1 per-app token files are read as keys named after the app. */
+const LEGACY_KEY_NAMES: Record<string, string> = {
+  "xiaomi-weknora-token": "小米手机",
+  "lobehub-weknora-token": "LobeHub",
+  "codeg-weknora-token": "Codeg",
 };
 
 export const STATIC_TOKEN_PREFIX = "wkmcp_";
@@ -68,7 +64,7 @@ const legacyTokenFileSchema = z.strictObject({
 type TokenFile = z.infer<typeof tokenFileSchema>;
 type KeyRecord = z.infer<typeof keyRecordSchema>;
 
-export type StaticKeySummary = Omit<KeyRecord, "tokenSha256" | "clientId">;
+export type StaticKeySummary = Omit<KeyRecord, "tokenSha256">;
 
 export interface StaticTokenMatch {
   clientId: string;
@@ -87,6 +83,14 @@ function sha256(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
 }
 
+function newToken(): string {
+  return `${STATIC_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+function summary({ tokenSha256: _hash, ...key }: KeyRecord): StaticKeySummary {
+  return key;
+}
+
 function newKeyId(): string {
   return randomBytes(6).toString("hex");
 }
@@ -99,12 +103,11 @@ function migrateLegacy(value: z.infer<typeof legacyTokenFileSchema>): TokenFile 
   return {
     version: 2,
     keys: Object.entries(value.clients).map(([clientId, record], index) => {
-      const target = LEGACY_TOKEN_CLIENTS[clientId];
       return {
         // Deterministic so that every reader of the legacy file agrees.
         id: createHash("sha256").update(`${clientId}:${index}`).digest("hex").slice(0, 12),
-        clientId: target?.clientId ?? clientId,
-        name: target?.keyName ?? clientId,
+        clientId,
+        name: LEGACY_KEY_NAMES[clientId] ?? clientId,
         tokenSha256: record.tokenSha256,
         enabled: record.enabled,
         createdAt: record.createdAt,
@@ -137,55 +140,77 @@ export class FileStaticTokenStore {
     return match;
   }
 
-  async listKeys(clientId: string): Promise<StaticKeySummary[]> {
-    return (await this.load()).keys
-      .filter((record) => record.clientId === clientId)
-      .map(({ id, name, enabled, createdAt }) => ({ id, name, enabled, createdAt }));
+  async listKeys(): Promise<StaticKeySummary[]> {
+    return (await this.load()).keys.map(summary);
   }
 
-  /** Issues a new named key; the plaintext token is returned only here. */
-  async createKey(
-    clientId: string,
-    name: string,
-  ): Promise<{ key: StaticKeySummary; token: string }> {
-    const token = `${STATIC_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+  /** Issues a new named key with its own client id; the token is returned only here. */
+  async createKey(name: string): Promise<{ key: StaticKeySummary; token: string }> {
+    const token = newToken();
+    const id = newKeyId();
     const record = keyRecordSchema.parse({
-      id: newKeyId(),
-      clientId,
+      id,
+      clientId: apiKeyClientId(id),
       name: name.trim(),
       tokenSha256: sha256(token).toString("hex"),
       enabled: true,
       createdAt: this.now().toISOString(),
     });
     await this.update((data) => {
-      if (data.keys.filter((key) => key.clientId === clientId).length >= 50) {
-        throw new StaticTokenError("Too many API keys for this client");
-      }
+      if (data.keys.length >= 100) throw new StaticTokenError("Too many API keys");
       data.keys.push(record);
     });
-    const { id, enabled, createdAt } = record;
-    return { key: { id, name: record.name, enabled, createdAt }, token };
+    return { key: summary(record), token };
   }
 
-  async setKeyEnabled(clientId: string, keyId: string, enabled: boolean): Promise<StaticKeySummary> {
-    let updated: KeyRecord | undefined;
-    await this.update((data) => {
-      updated = data.keys.find((key) => key.clientId === clientId && key.id === keyId);
-      if (!updated) throw new StaticTokenError("API key does not exist");
-      updated.enabled = enabled;
+  /** Replaces a key's token; its id, client and permissions stay the same. */
+  async rotateKey(keyId: string): Promise<{ key: StaticKeySummary; token: string }> {
+    const token = newToken();
+    const record = await this.change(keyId, (key) => {
+      key.tokenSha256 = sha256(token).toString("hex");
+      key.createdAt = this.now().toISOString();
     });
-    const { id, name, createdAt } = updated!;
-    return { id, name, enabled, createdAt };
+    return { key: record, token };
   }
 
-  async deleteKey(clientId: string, keyId: string): Promise<{ deleted: boolean }> {
+  setKeyEnabled(keyId: string, enabled: boolean): Promise<StaticKeySummary> {
+    return this.change(keyId, (key) => {
+      key.enabled = enabled;
+    });
+  }
+
+  renameKey(keyId: string, name: string): Promise<StaticKeySummary> {
+    return this.change(keyId, (key) => {
+      key.name = name.trim();
+    });
+  }
+
+  /** Moves a key to another access-policy client (used by migrations). */
+  reassignKey(keyId: string, clientId: string): Promise<StaticKeySummary> {
+    return this.change(keyId, (key) => {
+      key.clientId = clientId;
+    });
+  }
+
+  async deleteKey(keyId: string): Promise<{ deleted: boolean }> {
     let deleted = false;
     await this.update((data) => {
       const before = data.keys.length;
-      data.keys = data.keys.filter((key) => !(key.clientId === clientId && key.id === keyId));
+      data.keys = data.keys.filter((key) => key.id !== keyId);
       deleted = data.keys.length < before;
     });
     return { deleted };
+  }
+
+  private async change(keyId: string, mutate: (key: KeyRecord) => void): Promise<StaticKeySummary> {
+    let updated: KeyRecord | undefined;
+    await this.update((data) => {
+      updated = data.keys.find((key) => key.id === keyId);
+      if (!updated) throw new StaticTokenError("API key does not exist");
+      mutate(updated);
+      keyRecordSchema.parse(updated);
+    });
+    return summary(updated!);
   }
 
   private async load(): Promise<TokenFile> {

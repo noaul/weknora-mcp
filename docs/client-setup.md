@@ -62,27 +62,26 @@ callbacks and secrets are preserved during the unified-client migration.
 4. Complete the Keycloak login and consent flow.
 5. Reconnect or refresh tools after changing permissions.
 
-## API keys (Xiaomi phone, LobeHub, Codeg, coding agents)
+## Credentials and permissions
 
-Clients that cannot run OAuth use named static API keys of the single
-`Key 访问` client (`token-weknora`). All keys share that client's capabilities
-and knowledge-base scope.
+The console groups access by integration: ChatGPT, Claude, and API Key. Each
+integration page has a `连接信息` tab (shared MCP URL and authentication
+details), one tab per credential, and a `新增` tab. Every credential has its own
+capabilities and knowledge-base scope.
 
-1. In the management console, open `Key 访问`, choose its capabilities and
-   knowledge bases, and apply the MCP permissions.
-2. Enter a name such as `小米手机`, `LobeHub`, or `Codeg` and click `新建 Key`.
-   The `wkmcp_…` key is shown once; old keys cannot be viewed again, so create
-   a new one when a key is lost.
-3. Copy the ready-made configuration under `MCP 配置 (JSON)`:
-   - Codeg / Claude Code: `{"type": "http", "url": …, "headers": {"Authorization": "Bearer wkmcp_…"}}`
-   - Cursor, Claude Desktop, Cherry Studio: the `mcpServers` form
-   - Xiaomi phone: server URL `https://wek.uov.me/mcp` and the key as Auth Token
-     (`wkmcp_…` and `Bearer wkmcp_…` are both accepted)
-4. Disable or delete a single key from its row; other keys keep working.
-   Changes apply to the next request.
+- ChatGPT / Claude: each credential is a separate Keycloak OAuth client
+  (`chatgpt-weknora-xxxxxx`, `claude-weknora-xxxxxx`) with its own Client ID,
+  Client Secret, callback URL, and sessions. The Client Secret is shown once
+  after creation or rotation.
+- API Key: each key (`apikey-<id>`) is for one app such as the Xiaomi phone,
+  LobeHub, or Codeg. The key and a ready-to-paste configuration are shown once
+  after creation or rotation; old keys cannot be viewed, rotate to get a new
+  one with the same permissions. Configuration formats: HTTP
+  (`{"type": "http", "url": …, "headers": {"Authorization": "Bearer …"}}`),
+  `mcpServers`, and form fields (`wkmcp_…` and `Bearer wkmcp_…` both work).
 
-API keys do not expire. Keep `Key 访问` on the smallest capability set and
-knowledge-base allow-list its clients need.
+New credentials start read-only on the default knowledge base. Disable, rotate,
+or delete a credential from its tab; other credentials are unaffected.
 
 ## Permission choices
 

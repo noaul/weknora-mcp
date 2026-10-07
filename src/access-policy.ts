@@ -16,6 +16,7 @@ export const MCP_CAPABILITIES = [
   "knowledge.manage",
   "agents.read",
   "models.manage",
+  "tenants.manage",
 ] as const;
 
 const capabilitySchema = z.enum(MCP_CAPABILITIES);
@@ -103,7 +104,7 @@ const clientAccessPolicySchema = managedClientSchema
 const mcpAccessPolicySchema = z
   .strictObject({
     version: z.literal(2),
-    clients: z.array(clientAccessPolicySchema).min(1),
+    clients: z.array(clientAccessPolicySchema),
     updatedAt: z.string().datetime().optional(),
     updatedBy: z.string().trim().min(1).max(200).optional(),
   })
@@ -165,12 +166,13 @@ function migratedClient(
   });
 }
 
+export type NewClientAccessPolicy = ClientAccessPolicy;
+
 export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
   private readonly policyFile: string;
   private readonly auditFile: string;
   private readonly fallbackKnowledgeBase: KnowledgeBaseChoice;
   private readonly defaultClients: ManagedAccessClient[];
-  private readonly inheritFrom: Record<string, string[]>;
   private readonly now: () => Date;
   private writeTail: Promise<void> = Promise.resolve();
 
@@ -178,9 +180,8 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     policyFile: string;
     auditFile: string;
     fallbackKnowledgeBase: KnowledgeBaseChoice;
+    /** Clients created when migrating a version-1 policy or a missing file. */
     defaultClients: ManagedAccessClient[];
-    /** New client id -> legacy client ids whose access it starts with. */
-    inheritFrom?: Record<string, string[]>;
     now?: () => Date;
   }) {
     this.policyFile = options.policyFile;
@@ -188,9 +189,12 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     this.fallbackKnowledgeBase = knowledgeBaseChoiceSchema.parse(
       options.fallbackKnowledgeBase,
     );
-    this.defaultClients = z.array(managedClientSchema).min(1).parse(options.defaultClients);
-    this.inheritFrom = options.inheritFrom ?? {};
+    this.defaultClients = z.array(managedClientSchema).parse(options.defaultClients);
     this.now = options.now ?? (() => new Date());
+  }
+
+  get fallback(): KnowledgeBaseChoice {
+    return this.fallbackKnowledgeBase;
   }
 
   async read(): Promise<McpAccessPolicy> {
@@ -224,20 +228,85 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     ) {
       return this.migrate(value);
     }
-    return this.withDefaultClients(parseMcpAccessPolicy(value));
+    return parseMcpAccessPolicy(value);
   }
 
-  async writeClient(
+  /** Read-only default access for a newly created client. */
+  defaultAccess(client: ManagedAccessClient): ClientAccessPolicy {
+    return migratedClient(client, this.fallbackKnowledgeBase.id, [this.fallbackKnowledgeBase]);
+  }
+
+  writeClient(
     clientId: string,
     update: McpClientPolicyUpdate,
     actor: KnowledgePolicyActor,
   ): Promise<McpAccessPolicy> {
-    const pending = this.writeTail.then(() => this.persistClient(clientId, update, actor));
-    this.writeTail = pending.then(
-      () => undefined,
-      () => undefined,
-    );
-    return pending;
+    return this.mutate(actor, (clients) => {
+      const index = clients.findIndex((client) => client.clientId === clientId);
+      if (index < 0) {
+        throw new McpAccessPolicyError(`OAuth client ${clientId} is not managed`);
+      }
+      const current = clients[index]!;
+      clients[index] = clientAccessPolicySchema.parse({
+        clientId: current.clientId,
+        label: current.label,
+        provider: current.provider,
+        ...update,
+      });
+      return {
+        action: "mcp_client_policy.updated",
+        details: {
+          clientId,
+          accessType: clients[index]!.accessType,
+          capabilities: clients[index]!.capabilities,
+          knowledgeBaseScope: clients[index]!.knowledgeBaseScope,
+          defaultKbId: clients[index]!.defaultKbId,
+          knowledgeBaseIds: clients[index]!.knowledgeBases.map(({ id }) => id),
+        },
+      };
+    });
+  }
+
+  addClients(
+    entries: NewClientAccessPolicy[],
+    actor: KnowledgePolicyActor,
+  ): Promise<McpAccessPolicy> {
+    return this.mutate(actor, (clients) => {
+      for (const entry of entries) {
+        if (clients.some(({ clientId }) => clientId === entry.clientId)) {
+          throw new McpAccessPolicyError(`Client ${entry.clientId} already exists`);
+        }
+        clients.push(clientAccessPolicySchema.parse(entry));
+      }
+      return {
+        action: "mcp_client.created",
+        details: { clientIds: entries.map(({ clientId }) => clientId) },
+      };
+    });
+  }
+
+  removeClients(clientIds: string[], actor: KnowledgePolicyActor): Promise<McpAccessPolicy> {
+    return this.mutate(actor, (clients) => {
+      const removed = clients.filter(({ clientId }) => clientIds.includes(clientId));
+      clients.splice(0, clients.length, ...clients.filter(({ clientId }) => !clientIds.includes(clientId)));
+      return {
+        action: "mcp_client.deleted",
+        details: { clientIds: removed.map(({ clientId }) => clientId) },
+      };
+    });
+  }
+
+  renameClient(
+    clientId: string,
+    label: string,
+    actor: KnowledgePolicyActor,
+  ): Promise<McpAccessPolicy> {
+    return this.mutate(actor, (clients) => {
+      const client = clients.find((candidate) => candidate.clientId === clientId);
+      if (!client) throw new McpAccessPolicyError(`OAuth client ${clientId} is not managed`);
+      client.label = label.trim();
+      return { action: "mcp_client.renamed", details: { clientId, label: client.label } };
+    });
   }
 
   async appendAudit(
@@ -283,38 +352,6 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     }
   }
 
-  /**
-   * Clients added to the gateway after the policy file was written start with
-   * read-only access to the fallback knowledge base until an admin edits them.
-   */
-  private withDefaultClients(policy: McpAccessPolicy): McpAccessPolicy {
-    const known = new Set(policy.clients.map(({ clientId }) => clientId));
-    const missing = this.defaultClients.filter(({ clientId }) => !known.has(clientId));
-    if (missing.length === 0) return policy;
-    return parseMcpAccessPolicy({
-      ...policy,
-      clients: [
-        ...policy.clients,
-        ...missing.map((client) => {
-          const legacy = policy.clients.find(({ clientId }) =>
-            (this.inheritFrom[client.clientId] ?? []).includes(clientId),
-          );
-          if (legacy) {
-            return clientAccessPolicySchema.parse({
-              ...legacy,
-              clientId: client.clientId,
-              label: client.label,
-              provider: client.provider,
-            });
-          }
-          return migratedClient(client, this.fallbackKnowledgeBase.id, [
-            this.fallbackKnowledgeBase,
-          ]);
-        }),
-      ],
-    });
-  }
-
   private migrate(value: unknown): McpAccessPolicy {
     const legacy = parseKnowledgePolicy(value);
     return parseMcpAccessPolicy({
@@ -325,54 +362,38 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     });
   }
 
-  private async persistClient(
-    clientId: string,
-    update: McpClientPolicyUpdate,
+  private mutate(
     actor: KnowledgePolicyActor,
+    change: (
+      clients: ClientAccessPolicy[],
+    ) => { action: string; details: Record<string, unknown> },
   ): Promise<McpAccessPolicy> {
-    const current = await this.read();
-    const index = current.clients.findIndex((client) => client.clientId === clientId);
-    if (index < 0) {
-      throw new McpAccessPolicyError(`OAuth client ${clientId} is not managed`);
-    }
-
-    const timestamp = this.now().toISOString();
-    const clients = [...current.clients];
-    clients[index] = clientAccessPolicySchema.parse({
-      clientId: current.clients[index]!.clientId,
-      label: current.clients[index]!.label,
-      provider: current.clients[index]!.provider,
-      ...update,
+    const pending = this.writeTail.then(async () => {
+      const current = await this.read();
+      const clients = current.clients.map((client) => ({ ...client }));
+      const audit = change(clients);
+      const timestamp = this.now().toISOString();
+      const policy = parseMcpAccessPolicy({
+        version: 2,
+        clients,
+        updatedAt: timestamp,
+        updatedBy: actor.username,
+      });
+      const temporaryFile = `${this.policyFile}.tmp`;
+      await mkdir(dirname(this.policyFile), { recursive: true, mode: 0o750 });
+      await writeFile(temporaryFile, `${JSON.stringify(policy, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o640,
+      });
+      await rename(temporaryFile, this.policyFile);
+      await this.appendAuditRecord({ timestamp, action: audit.action, actor, details: audit.details });
+      return policy;
     });
-    const policy = parseMcpAccessPolicy({
-      version: 2,
-      clients,
-      updatedAt: timestamp,
-      updatedBy: actor.username,
-    });
-    const temporaryFile = `${this.policyFile}.tmp`;
-
-    await mkdir(dirname(this.policyFile), { recursive: true, mode: 0o750 });
-    await mkdir(dirname(this.auditFile), { recursive: true, mode: 0o750 });
-    await writeFile(temporaryFile, `${JSON.stringify(policy, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o640,
-    });
-    await rename(temporaryFile, this.policyFile);
-    await this.appendAuditRecord({
-      timestamp,
-      action: "mcp_client_policy.updated",
-      actor,
-      details: {
-        clientId,
-        accessType: clients[index]!.accessType,
-        capabilities: clients[index]!.capabilities,
-        knowledgeBaseScope: clients[index]!.knowledgeBaseScope,
-        defaultKbId: clients[index]!.defaultKbId,
-        knowledgeBaseIds: clients[index]!.knowledgeBases.map(({ id }) => id),
-      },
-    });
-    return policy;
+    this.writeTail = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
   }
 
   private async appendAuditRecord(record: Record<string, unknown>): Promise<void> {

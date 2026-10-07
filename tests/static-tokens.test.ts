@@ -12,60 +12,63 @@ import {
   mcpClientConfig,
 } from "../src/static-tokens.js";
 
-const CLIENT = "token-weknora";
-
 function store() {
   const file = join(tmpdir(), `static-tokens-${randomUUID()}.json`);
   return { file, tokens: new FileStaticTokenStore({ file }) };
 }
 
 describe("static API key store", () => {
-  it("issues named keys, stores only hashes, and verifies each key", async () => {
+  it("issues each named key with its own client id and stores only hashes", async () => {
     const { file, tokens } = store();
 
-    const phone = await tokens.createKey(CLIENT, " 小米手机 ");
-    const codeg = await tokens.createKey(CLIENT, "Codeg");
+    const phone = await tokens.createKey(" 小米手机 ");
+    const codeg = await tokens.createKey("Codeg");
 
     expect(phone.token).toMatch(/^wkmcp_[A-Za-z0-9_-]{43}$/);
-    expect(phone.key).toMatchObject({ name: "小米手机", enabled: true });
+    expect(phone.key).toMatchObject({
+      name: "小米手机",
+      enabled: true,
+      clientId: `apikey-${phone.key.id}`,
+    });
+    expect(codeg.key.clientId).not.toBe(phone.key.clientId);
     expect(await tokens.verify(phone.token)).toEqual({
-      clientId: CLIENT,
+      clientId: phone.key.clientId,
       keyId: phone.key.id,
       keyName: "小米手机",
     });
-    expect(await tokens.verify(codeg.token)).toMatchObject({ keyName: "Codeg" });
     expect(await tokens.verify(`${codeg.token}x`)).toBeUndefined();
     expect(await tokens.verify("not-a-static-token")).toBeUndefined();
     const text = await readFile(file, "utf8");
     expect(text).not.toContain(phone.token);
     expect(text).not.toContain(codeg.token);
-    expect((await tokens.listKeys(CLIENT)).map(({ name }) => name)).toEqual([
-      "小米手机",
-      "Codeg",
-    ]);
+    expect((await tokens.listKeys()).map(({ name }) => name)).toEqual(["小米手机", "Codeg"]);
   });
 
-  it("disables and deletes one key without affecting the others", async () => {
+  it("rotates, renames, disables, and deletes one key without affecting others", async () => {
     const { tokens } = store();
-    const first = await tokens.createKey(CLIENT, "LobeHub");
-    const second = await tokens.createKey(CLIENT, "Codeg");
+    const first = await tokens.createKey("LobeHub");
+    const second = await tokens.createKey("Codeg");
 
-    await tokens.setKeyEnabled(CLIENT, first.key.id, false);
+    const rotated = await tokens.rotateKey(first.key.id);
+    expect(rotated.key.clientId).toBe(first.key.clientId);
     expect(await tokens.verify(first.token)).toBeUndefined();
-    expect(await tokens.verify(second.token)).toBeDefined();
-    await tokens.setKeyEnabled(CLIENT, first.key.id, true);
-    expect(await tokens.verify(first.token)).toBeDefined();
+    expect(await tokens.verify(rotated.token)).toMatchObject({ clientId: first.key.clientId });
 
-    expect(await tokens.deleteKey(CLIENT, first.key.id)).toEqual({ deleted: true });
-    expect(await tokens.verify(first.token)).toBeUndefined();
+    await tokens.renameKey(first.key.id, "LobeHub 服务器");
+    await tokens.setKeyEnabled(first.key.id, false);
+    expect(await tokens.verify(rotated.token)).toBeUndefined();
     expect(await tokens.verify(second.token)).toBeDefined();
-    expect(await tokens.deleteKey(CLIENT, first.key.id)).toEqual({ deleted: false });
-    await expect(tokens.setKeyEnabled(CLIENT, first.key.id, true)).rejects.toThrow(
-      /does not exist/,
-    );
+    await tokens.setKeyEnabled(first.key.id, true);
+    expect(await tokens.verify(rotated.token)).toMatchObject({ keyName: "LobeHub 服务器" });
+
+    expect(await tokens.deleteKey(first.key.id)).toEqual({ deleted: true });
+    expect(await tokens.verify(rotated.token)).toBeUndefined();
+    expect(await tokens.verify(second.token)).toBeDefined();
+    expect(await tokens.deleteKey(first.key.id)).toEqual({ deleted: false });
+    await expect(tokens.setKeyEnabled(first.key.id, true)).rejects.toThrow(/does not exist/);
   });
 
-  it("migrates a legacy per-app token file into named keys of the merged client", async () => {
+  it("reads a legacy per-app token file as named keys of the legacy client", async () => {
     const { file, tokens } = store();
     const legacyToken = "wkmcp_legacy-phone-token";
     await writeFile(
@@ -82,26 +85,22 @@ describe("static API key store", () => {
       }),
     );
 
+    const [legacy] = await tokens.listKeys();
+    expect(legacy).toMatchObject({ clientId: "xiaomi-weknora-token", name: "小米手机" });
+    await tokens.reassignKey(legacy!.id, `apikey-${legacy!.id}`);
+
+    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({ version: 2 });
     expect(await tokens.verify(legacyToken)).toMatchObject({
-      clientId: CLIENT,
+      clientId: `apikey-${legacy!.id}`,
       keyName: "小米手机",
     });
-    const added = await tokens.createKey(CLIENT, "Codeg");
-    const persisted = JSON.parse(await readFile(file, "utf8")) as { version: number };
-
-    expect(persisted.version).toBe(2);
-    expect(await tokens.verify(legacyToken)).toMatchObject({ keyName: "小米手机" });
-    expect((await tokens.listKeys(CLIENT)).map(({ name }) => name)).toEqual([
-      "小米手机",
-      added.key.name,
-    ]);
   });
 });
 
 describe("combined token verifier", () => {
   it("routes static keys to the store and others to OAuth", async () => {
     const { tokens } = store();
-    const { token, key } = await tokens.createKey(CLIENT, "小米手机");
+    const { token, key } = await tokens.createKey("小米手机");
     const oauth = vi.fn(async () => ({
       subject: "user",
       clientId: "chatgpt-weknora-read",
@@ -114,8 +113,8 @@ describe("combined token verifier", () => {
     });
 
     await expect(verify(token)).resolves.toEqual({
-      subject: `static-token:${CLIENT}:${key.id}`,
-      clientId: CLIENT,
+      subject: `static-token:${key.clientId}:${key.id}`,
+      clientId: key.clientId,
       scopes: ["weknora:mcp"],
     });
     await expect(verify("wkmcp_wrong")).rejects.toBeInstanceOf(AuthenticationError);

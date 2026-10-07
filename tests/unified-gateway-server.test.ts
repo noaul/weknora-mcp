@@ -413,6 +413,38 @@ describe("unified MCP gateway", () => {
       ]);
     });
 
+    it("lists only the sessions this client created", async () => {
+      const sessions = new MemorySessionOwnershipStore();
+      await sessions.record("own-session", talker.clientId);
+      await sessions.record("foreign-session", "claude-weknora-read");
+      const callTool = vi.fn(async (): Promise<CallToolResult> => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              data: [{ id: "own-session" }, { id: "foreign-session" }, { id: "web-ui" }],
+              total: 3,
+              success: true,
+            }),
+          },
+        ],
+      }));
+      const { client } = await connect({
+        client: talker,
+        tools: [...conversationTools, tool("list_sessions", { page: { type: "integer" } })],
+        upstream: { callTool },
+        sessions,
+      });
+
+      const result = await client.callTool({ name: "list_sessions", arguments: {} });
+
+      expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toEqual({
+        data: [{ id: "own-session" }],
+        total: 1,
+        success: true,
+      });
+    });
+
     it("forgets a session after it is deleted", async () => {
       const sessions = new MemorySessionOwnershipStore();
       await sessions.record("own-session", talker.clientId);

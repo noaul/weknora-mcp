@@ -381,6 +381,26 @@ async function preflightSession(
   }
 }
 
+async function ownSessionsOnly(
+  result: CallToolResult,
+  client: ClientAccessPolicy,
+  sessions: SessionOwnershipStore,
+): Promise<CallToolResult> {
+  if (result.isError) return result;
+  const record = objectRecord(parseResultJson(result));
+  if (!record || !Array.isArray(record.data)) {
+    throw new PolicyError("Upstream session list cannot be inspected");
+  }
+  const owned = await sessions.owned(client.clientId);
+  const data = record.data.filter((item) => {
+    const id = objectRecord(item)?.id;
+    return typeof id === "string" && owned.has(id);
+  });
+  return {
+    content: [{ type: "text", text: JSON.stringify({ ...record, data, total: data.length }) }],
+  };
+}
+
 function createdSessionId(result: CallToolResult): string | undefined {
   if (result.isError) return undefined;
   let parsed: unknown;
@@ -463,6 +483,9 @@ export function createUnifiedGatewayMcpServer(
         importRoot: options.importRoot,
       });
       const result = await options.upstream.callTool(call);
+      if (name === "list_sessions" && client.accessType !== "full") {
+        return await ownSessionsOnly(result, client, options.sessions);
+      }
       if (name === "create_session") {
         const sessionId = createdSessionId(result);
         if (sessionId) await options.sessions.record(sessionId, client.clientId);

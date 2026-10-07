@@ -29,9 +29,9 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z" /></svg>
             <span>概览</span>
           </button>
-          <p class="nav-label">MCP 客户端</p>
+          <p class="nav-label">MCP 接入</p>
           <div id="oauth-client-list" class="nav-clients" aria-busy="true"></div>
-          <div id="oauth-empty-state" class="nav-empty" hidden>没有可管理的客户端</div>
+          <div id="oauth-empty-state" class="nav-empty" hidden>暂无接入方式</div>
         </nav>
 
         <div class="sidebar-bottom">
@@ -60,16 +60,16 @@
           <section id="overview-view" class="view" aria-labelledby="view-title">
             <div class="stat-grid">
               <div class="stat">
-                <span class="stat-label">已启用客户端</span>
+                <span class="stat-label">已启用凭据</span>
                 <strong id="oauth-enabled-count">-</strong>
               </div>
               <div class="stat">
-                <span class="stat-label">活跃会话</span>
+                <span class="stat-label">OAuth 活跃会话</span>
                 <strong id="oauth-session-count">-</strong>
               </div>
               <div class="stat">
-                <span class="stat-label">知识库范围</span>
-                <strong class="stat-text">按客户端配置</strong>
+                <span class="stat-label">权限管理</span>
+                <strong class="stat-text">按凭据单独配置</strong>
               </div>
             </div>
 
@@ -83,8 +83,8 @@
 
             <section class="group" aria-labelledby="clients-title">
               <div class="group-heading">
-                <h2 id="clients-title">客户端</h2>
-                <span class="muted">按能力授权 / 全权限 · 知识库范围</span>
+                <h2 id="clients-title">接入方式</h2>
+                <span class="muted">每个凭据单独配置权限与知识库范围</span>
               </div>
               <div id="overview-clients" class="group-body"></div>
             </section>
@@ -97,7 +97,7 @@
             </section>
           </section>
 
-          <section id="client-view" class="view" hidden></section>
+          <section id="client-view" class="view integration-view" hidden></section>
         </div>
       </main>
     </div>

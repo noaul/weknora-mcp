@@ -6,7 +6,7 @@ import { buildConsoleApp } from "./console-app.js";
 import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
 import { KeycloakAdminClient } from "./keycloak-admin.js";
-import { ACCESS_POLICY_INHERITANCE, MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
+import { MANAGED_ACCESS_CLIENTS, migrateApiKeyClients } from "./managed-clients.js";
 import { FileStaticTokenStore } from "./static-tokens.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
@@ -68,8 +68,14 @@ async function main(): Promise<void> {
     auditFile: config.auditFile,
     fallbackKnowledgeBase: config.fallbackKnowledgeBase,
     defaultClients: MANAGED_ACCESS_CLIENTS,
-    inheritFrom: ACCESS_POLICY_INHERITANCE,
   });
+  const staticTokens = new FileStaticTokenStore({ file: config.staticTokenFile });
+  const migration = await migrateApiKeyClients(accessPolicyStore, staticTokens);
+  if (migration.migratedKeys > 0 || migration.removedClients.length > 0) {
+    console.log(
+      `Migrated ${migration.migratedKeys} API key(s) to per-key clients; removed ${migration.removedClients.join(", ") || "none"}`,
+    );
+  }
   const weknora = new WeKnoraApiClient({
     baseUrl: config.weknoraApiUrl,
     apiKey: weknoraApiKey,
@@ -87,7 +93,7 @@ async function main(): Promise<void> {
     sessions,
     accessPolicyStore,
     oauthClientManager,
-    staticTokens: new FileStaticTokenStore({ file: config.staticTokenFile }),
+    staticTokens,
     weknora,
     checkServices: async () => ({
       gateway: await healthStatus(config.gatewayHealthUrl),

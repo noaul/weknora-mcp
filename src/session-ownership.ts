@@ -11,6 +11,7 @@ import { z } from "zod";
  */
 export interface SessionOwnershipStore {
   owner(sessionId: string): Promise<string | undefined>;
+  owned(clientId: string): Promise<Set<string>>;
   record(sessionId: string, clientId: string): Promise<void>;
   forget(sessionId: string): Promise<void>;
 }
@@ -45,6 +46,15 @@ export class FileSessionOwnershipStore implements SessionOwnershipStore {
     return Object.hasOwn(data.sessions, sessionId)
       ? data.sessions[sessionId]!.clientId
       : undefined;
+  }
+
+  async owned(clientId: string): Promise<Set<string>> {
+    const data = await this.load();
+    return new Set(
+      Object.entries(data.sessions)
+        .filter(([, record]) => record.clientId === clientId)
+        .map(([id]) => id),
+    );
   }
 
   record(sessionId: string, clientId: string): Promise<void> {
@@ -109,6 +119,12 @@ export class MemorySessionOwnershipStore implements SessionOwnershipStore {
 
   async owner(sessionId: string): Promise<string | undefined> {
     return this.sessions.get(sessionId);
+  }
+
+  async owned(clientId: string): Promise<Set<string>> {
+    return new Set(
+      [...this.sessions].filter(([, owner]) => owner === clientId).map(([id]) => id),
+    );
   }
 
   async record(sessionId: string, clientId: string): Promise<void> {

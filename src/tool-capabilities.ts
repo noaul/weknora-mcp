@@ -14,8 +14,8 @@ export type ToolAccessRule =
   | { kind: "replaced" };
 
 const TOOL_ACCESS_RULES = {
-  create_tenant: { kind: "full" },
-  list_tenants: { kind: "full" },
+  create_tenant: { kind: "capability", capabilities: ["tenants.manage"] },
+  list_tenants: { kind: "capability", capabilities: ["tenants.manage"] },
   create_knowledge_base: {
     kind: "capability",
     capabilities: ["knowledge.manage"],
@@ -94,7 +94,8 @@ const TOOL_ACCESS_RULES = {
     capabilities: ["conversation.use"],
     resourceScope: "session",
   },
-  list_sessions: { kind: "full" },
+  // Results are filtered to the sessions this client created.
+  list_sessions: { kind: "capability", capabilities: ["conversation.use"] },
   delete_session: {
     kind: "capability",
     capabilities: ["conversation.use"],

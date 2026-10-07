@@ -1,120 +1,118 @@
-import { randomUUID } from "node:crypto";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { FileMcpAccessPolicyStore } from "../src/access-policy.js";
 import { buildConsoleApp } from "../src/console-app.js";
 import { ConsoleSessionStore } from "../src/console-auth.js";
+import type { OAuthClientState } from "../src/keycloak-admin.js";
+import { MANAGED_ACCESS_CLIENTS } from "../src/managed-clients.js";
 import { FileStaticTokenStore } from "../src/static-tokens.js";
 
 const KB_A = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const KB_B = "14f18c87-26b4-4b51-ac9f-cb57ace46df7";
 const CHATGPT_CLIENT_ID = "chatgpt-weknora-read";
-const TOKEN_CLIENT_ID = "token-weknora";
 
-function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.json`)) {
-  const sessions = new ConsoleSessionStore({
-    ttlMs: 60_000,
-    secret: Buffer.alloc(32, 9),
-  });
-  let policy = {
-    version: 2 as const,
-    clients: [
+function fakeKeycloak() {
+  const clients = new Map<string, OAuthClientState>([
+    [
+      CHATGPT_CLIENT_ID,
       {
         clientId: CHATGPT_CLIENT_ID,
-        label: "ChatGPT WeKnora",
-        provider: "ChatGPT" as const,
-        accessType: "capabilities" as const,
-        capabilities: ["knowledge.read" as const],
-        knowledgeBaseScope: "selected" as const,
-        defaultKbId: KB_A,
-        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
-      },
-      {
-        clientId: "claude-weknora-read",
-        label: "Claude WeKnora",
-        provider: "Claude" as const,
-        accessType: "capabilities" as const,
-        capabilities: ["knowledge.read" as const],
-        knowledgeBaseScope: "selected" as const,
-        defaultKbId: KB_A,
-        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
-      },
-      ...([[TOKEN_CLIENT_ID, "Key 访问", "Token"]] as const).map(
-        ([clientId, label, provider]) => ({
-        clientId,
-        label,
-        provider,
-        accessType: "capabilities" as const,
-        capabilities: ["knowledge.read" as const],
-        knowledgeBaseScope: "selected" as const,
-        defaultKbId: KB_A,
-        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
-      }),
-      ),
-    ],
-  };
-  const writeClient = vi.fn(async (clientId, update, actor) => {
-    policy = {
-      version: 2,
-      clients: policy.clients.map((client) =>
-        client.clientId === clientId
-          ? ({ ...client, ...update } as (typeof policy.clients)[number])
-          : client,
-      ),
-    };
-    return {
-      ...policy,
-      updatedAt: "2026-09-01T02:00:00.000Z",
-      updatedBy: actor.username,
-    };
-  });
-  const appendAudit = vi.fn(async () => undefined);
-  const oauthClientManager = {
-    listManagedClients: vi.fn(async () => [
-      {
-        key: "chatgpt-read",
-        label: "ChatGPT WeKnora",
-        provider: "ChatGPT" as const,
-        clientId: CHATGPT_CLIENT_ID,
-        mcpUrl: "https://wek.uov.me/mcp",
-        scope: "weknora:mcp",
-        issuer: "https://wek.uov.me/oauth/realms/weknora",
-        authorizationEndpoint:
-          "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
-        tokenEndpoint:
-          "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token",
+        exists: true,
         enabled: true,
         redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
         sessionCount: 1,
       },
-    ]),
-    updateManagedClient: vi.fn(async (_key, update) => ({
-      key: "chatgpt-read",
-      label: "ChatGPT WeKnora",
-      provider: "ChatGPT" as const,
-      clientId: CHATGPT_CLIENT_ID,
-      mcpUrl: "https://wek.uov.me/mcp",
-      scope: "weknora:mcp",
+    ],
+    [
+      "claude-weknora-read",
+      {
+        clientId: "claude-weknora-read",
+        exists: true,
+        enabled: true,
+        redirectUri: "https://claude.ai/api/mcp/auth_callback",
+        sessionCount: 0,
+      },
+    ],
+  ]);
+  return {
+    clients,
+    endpoints: () => ({
       issuer: "https://wek.uov.me/oauth/realms/weknora",
-      authorizationEndpoint:
-        "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
-      tokenEndpoint:
-        "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token",
-      enabled: update.enabled ?? true,
-      redirectUri:
-        update.redirectUri ??
-        "https://chatgpt.com/connector_platform_oauth_redirect",
-      sessionCount: 1,
-    })),
-    rotateManagedClientSecret: vi.fn(async () => ({
+      authorizationEndpoint: "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/auth",
+      tokenEndpoint: "https://wek.uov.me/oauth/realms/weknora/protocol/openid-connect/token",
+    }),
+    listClients: vi.fn(async (ids: string[]) =>
+      ids.map(
+        (clientId) =>
+          clients.get(clientId) ?? {
+            clientId,
+            exists: false,
+            enabled: false,
+            redirectUri: "",
+            sessionCount: 0,
+          },
+      ),
+    ),
+    createClient: vi.fn(async (options: { clientId: string; redirectUri: string }) => {
+      const state = {
+        clientId: options.clientId,
+        exists: true,
+        enabled: true,
+        redirectUri: options.redirectUri,
+        sessionCount: 0,
+      };
+      clients.set(options.clientId, state);
+      return { state, secret: "created-client-secret" };
+    }),
+    deleteClient: vi.fn(async (clientId: string) => ({ deleted: clients.delete(clientId) })),
+    updateClient: vi.fn(async (clientId: string, update: { enabled?: boolean; redirectUri?: string }) => {
+      const state = clients.get(clientId)!;
+      Object.assign(state, {
+        ...(update.enabled === undefined ? {} : { enabled: update.enabled }),
+        ...(update.redirectUri === undefined ? {} : { redirectUri: update.redirectUri }),
+      });
+      return state;
+    }),
+    rotateClientSecret: vi.fn(async () => ({
       secret: "new-one-time-secret",
       oldSecretInvalidated: true,
     })),
-    revokeManagedClientSessions: vi.fn(async () => ({ revokedSessions: 1 })),
+    revokeClientSessions: vi.fn(async () => ({ revokedSessions: 1 })),
   };
-  const staticTokens = new FileStaticTokenStore({ file: staticTokenFile });
+}
+
+async function createFixture() {
+  const root = await mkdtemp(join(tmpdir(), "weknora-console-"));
+  const policyFile = join(root, "policy.json");
+  await writeFile(
+    policyFile,
+    JSON.stringify({
+      version: 2,
+      clients: MANAGED_ACCESS_CLIENTS.map((client) => ({
+        ...client,
+        accessType: "capabilities",
+        capabilities: ["knowledge.read"],
+        knowledgeBaseScope: "selected",
+        defaultKbId: KB_A,
+        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+      })),
+    }),
+  );
+  const sessions = new ConsoleSessionStore({ ttlMs: 60_000, secret: Buffer.alloc(32, 9) });
+  const policyStore = new FileMcpAccessPolicyStore({
+    policyFile,
+    auditFile: join(root, "audit.ndjson"),
+    fallbackKnowledgeBase: { id: KB_A, name: "镍基合金" },
+    defaultClients: MANAGED_ACCESS_CLIENTS,
+  });
+  const writeClient = vi.spyOn(policyStore, "writeClient");
+  const appendAudit = vi.spyOn(policyStore, "appendAudit");
+  const staticTokens = new FileStaticTokenStore({ file: join(root, "tokens.json") });
+  const oauthClientManager = fakeKeycloak();
   const app = buildConsoleApp({
     publicUrl: new URL("https://wek.uov.me/mcp-console/"),
     oidc: {
@@ -129,18 +127,7 @@ function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.
       })),
     },
     sessions,
-    accessPolicyStore: {
-      read: async () => policy,
-      writeClient,
-      appendAudit,
-      readAudit: async () => [
-        {
-          timestamp: "2026-09-01T01:00:00.000Z",
-          actor: "aodo",
-          action: "updated",
-        },
-      ],
-    },
+    accessPolicyStore: policyStore,
     oauthClientManager,
     staticTokens,
     weknora: {
@@ -167,7 +154,7 @@ function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.
     indexHtml: "<!doctype html><title>MCP Console</title>",
     logLevel: "silent",
   });
-  return { app, writeClient, appendAudit, oauthClientManager, staticTokens };
+  return { app, policyStore, writeClient, appendAudit, staticTokens, oauthClientManager };
 }
 
 async function login(app: ReturnType<typeof buildConsoleApp>) {
@@ -200,7 +187,7 @@ async function csrf(app: ReturnType<typeof buildConsoleApp>, cookie: string) {
 
 describe("MCP console HTTP app", () => {
   it("redirects logged-out users through OIDC", async () => {
-    const { app } = createFixture();
+    const { app } = await createFixture();
     const page = await app.inject({ method: "GET", url: "/mcp-console/" });
     const loginResponse = await app.inject({ method: "GET", url: "/mcp-console/login" });
 
@@ -210,7 +197,7 @@ describe("MCP console HTTP app", () => {
   });
 
   it("rejects an OAuth callback that is not bound to the initiating browser", async () => {
-    const { app } = createFixture();
+    const { app } = await createFixture();
     const callback = await app.inject({
       method: "GET",
       url: "/mcp-console/oauth/callback?state=state-1&code=code-1",
@@ -221,7 +208,7 @@ describe("MCP console HTTP app", () => {
   });
 
   it("returns a secret-free overview with one gateway health status", async () => {
-    const { app } = createFixture();
+    const { app } = await createFixture();
     const cookie = await login(app);
     const overview = await app.inject({
       method: "GET",
@@ -235,125 +222,227 @@ describe("MCP console HTTP app", () => {
       services: { gateway: "healthy" },
     });
     expect(overview.json().knowledgeBases).toHaveLength(2);
-    expect(JSON.stringify(overview.json())).not.toMatch(/secret|api.?key/i);
+    expect(JSON.stringify(overview.json())).not.toMatch(/secret|wkmcp_/i);
     await app.close();
   });
 
-  it("merges each OAuth client with its MCP access policy", async () => {
-    const { app } = createFixture();
+  it("lists integrations with one credential entry per OAuth client or API key", async () => {
+    const { app } = await createFixture();
     const cookie = await login(app);
     const response = await app.inject({
       method: "GET",
-      url: "/mcp-console/api/oauth-clients",
+      url: "/mcp-console/api/integrations",
       headers: { cookie },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      capabilities: expect.arrayContaining(["knowledge.read", "models.manage"]),
-      clients: [
+    const body = response.json();
+    expect(body).toMatchObject({
+      capabilities: expect.arrayContaining(["knowledge.read", "tenants.manage"]),
+      mcpUrl: "https://wek.uov.me/mcp",
+      scope: "weknora:mcp",
+      oauth: { issuer: "https://wek.uov.me/oauth/realms/weknora", unavailable: false },
+      integrations: [
         {
-          clientId: CHATGPT_CLIENT_ID,
-          scope: "weknora:mcp",
-          access: {
-            accessType: "capabilities",
-            capabilities: ["knowledge.read"],
-            knowledgeBaseScope: "selected",
-            defaultKbId: KB_A,
-          },
+          id: "chatgpt",
+          kind: "oauth",
+          defaultRedirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+          credentials: [
+            {
+              clientId: CHATGPT_CLIENT_ID,
+              exists: true,
+              enabled: true,
+              sessionCount: 1,
+              access: { capabilities: ["knowledge.read"] },
+            },
+          ],
         },
-        {
-          kind: "token",
-          key: "api-keys",
-          clientId: TOKEN_CLIENT_ID,
-          keys: [],
-          enabled: false,
-          access: { capabilities: ["knowledge.read"] },
-        },
+        { id: "claude", kind: "oauth", credentials: [{ clientId: "claude-weknora-read" }] },
+        { id: "apikey", kind: "token", credentials: [] },
       ],
     });
-    expect(JSON.stringify(response.json())).not.toContain("new-one-time-secret");
+    expect(JSON.stringify(body)).not.toContain("secret\":");
     await app.close();
   });
 
-  it("updates one managed client's capabilities and selected knowledge bases", async () => {
-    const { app, writeClient } = createFixture();
+  it("creates, updates, rotates, and deletes an OAuth credential with its own policy", async () => {
+    const { app, policyStore, oauthClientManager } = await createFixture();
     const cookie = await login(app);
     const token = await csrf(app, cookie);
-    const payload = {
-      accessType: "capabilities",
-      capabilities: ["knowledge.read", "conversation.use"],
-      knowledgeBaseScope: "selected",
-      defaultKbId: KB_B,
-      allowedKbIds: [KB_A, KB_B],
-    };
-    const rejected = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
-      headers: { cookie },
-      payload,
+    const headers = { cookie, "x-csrf-token": token };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/integrations/chatgpt/credentials",
+      headers,
+      payload: { label: "工作账号" },
     });
-    const accepted = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
-      headers: { cookie, "x-csrf-token": token },
-      payload,
+    expect(created.statusCode).toBe(200);
+    const { clientId, secret } = created.json() as { clientId: string; secret: string };
+    expect(clientId).toMatch(/^chatgpt-weknora-[0-9a-f]{6}$/);
+    expect(secret).toBe("created-client-secret");
+    expect(oauthClientManager.createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId,
+        label: "工作账号",
+        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+        templateClientIds: [CHATGPT_CLIENT_ID, "claude-weknora-read"],
+      }),
+    );
+    expect((await policyStore.read()).clients.at(-1)).toMatchObject({
+      clientId,
+      label: "工作账号",
+      provider: "ChatGPT",
+      capabilities: ["knowledge.read"],
     });
 
-    expect(rejected.statusCode).toBe(403);
-    expect(accepted.statusCode).toBe(200);
-    expect(writeClient).toHaveBeenCalledWith(
-      CHATGPT_CLIENT_ID,
-      {
+    const path = `/mcp-console/api/credentials/${clientId}`;
+    const policy = await app.inject({
+      method: "PUT",
+      url: `${path}/access-policy`,
+      headers,
+      payload: {
         accessType: "capabilities",
         capabilities: ["knowledge.read", "conversation.use"],
         knowledgeBaseScope: "selected",
         defaultKbId: KB_B,
-        knowledgeBases: [
-          { id: KB_A, name: "镍基合金" },
-          { id: KB_B, name: "熔盐堆" },
-        ],
+        allowedKbIds: [KB_A, KB_B],
       },
-      { subject: "user-1", username: "aodo" },
+    });
+    expect(policy.statusCode).toBe(200);
+    const updated = await app.inject({
+      method: "PUT",
+      url: path,
+      headers,
+      payload: { label: "工作 ChatGPT", enabled: false, redirectUri: "https://chatgpt.com/cb" },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(oauthClientManager.updateClient).toHaveBeenCalledWith(clientId, {
+      enabled: false,
+      redirectUri: "https://chatgpt.com/cb",
+    });
+    const rotated = await app.inject({ method: "POST", url: `${path}/rotate-secret`, headers });
+    expect(rotated.json()).toEqual({ secret: "new-one-time-secret", oldSecretInvalidated: true });
+    const revoked = await app.inject({ method: "POST", url: `${path}/revoke-sessions`, headers });
+    expect(revoked.json()).toEqual({ revokedSessions: 1 });
+
+    const stored = (await policyStore.read()).clients.find((client) => client.clientId === clientId);
+    expect(stored).toMatchObject({
+      label: "工作 ChatGPT",
+      capabilities: ["knowledge.read", "conversation.use"],
+      defaultKbId: KB_B,
+    });
+    const chatgpt = (await policyStore.read()).clients.find(
+      (client) => client.clientId === CHATGPT_CLIENT_ID,
+    );
+    expect(chatgpt?.capabilities).toEqual(["knowledge.read"]);
+
+    const deleted = await app.inject({ method: "DELETE", url: path, headers });
+    expect(deleted.json()).toEqual({ deleted: true });
+    expect(oauthClientManager.deleteClient).toHaveBeenCalledWith(clientId);
+    expect((await policyStore.read()).clients.map((client) => client.clientId)).not.toContain(
+      clientId,
     );
     await app.close();
   });
 
-  it("normalizes full access to all knowledge bases and no capability overrides", async () => {
-    const { app, writeClient } = createFixture();
+  it("issues API keys as separate credentials with their own permissions", async () => {
+    const { app, policyStore, staticTokens, appendAudit } = await createFixture();
     const cookie = await login(app);
     const token = await csrf(app, cookie);
-    const response = await app.inject({
+    const headers = { cookie, "x-csrf-token": token };
+    const create = (label: string) =>
+      app.inject({
+        method: "POST",
+        url: "/mcp-console/api/integrations/apikey/credentials",
+        headers,
+        payload: { label },
+      });
+
+    const noCsrf = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/integrations/apikey/credentials",
+      headers: { cookie },
+      payload: { label: "Codeg" },
+    });
+    expect(noCsrf.statusCode).toBe(403);
+    expect((await create(" ")).statusCode).toBe(400);
+
+    const codeg = (await create("Codeg")).json() as {
+      clientId: string;
+      secret: string;
+      mcpConfig: unknown;
+    };
+    const phone = (await create("小米手机")).json() as { clientId: string; secret: string };
+    expect(codeg.clientId).toMatch(/^apikey-[0-9a-f]{12}$/);
+    expect(codeg.mcpConfig).toEqual({
+      type: "http",
+      url: "https://wek.uov.me/mcp",
+      headers: { Authorization: `Bearer ${codeg.secret}` },
+    });
+    expect(await staticTokens.verify(codeg.secret)).toMatchObject({ clientId: codeg.clientId });
+
+    await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
-      headers: { cookie, "x-csrf-token": token },
+      url: `/mcp-console/api/credentials/${codeg.clientId}/access-policy`,
+      headers,
       payload: {
-        accessType: "full",
-        capabilities: [],
+        accessType: "capabilities",
+        capabilities: ["knowledge.read", "knowledge.write"],
         knowledgeBaseScope: "all",
         defaultKbId: KB_A,
         allowedKbIds: [],
       },
     });
+    const clients = (await policyStore.read()).clients;
+    expect(clients.find((client) => client.clientId === codeg.clientId)).toMatchObject({
+      label: "Codeg",
+      provider: "Token",
+      capabilities: ["knowledge.read", "knowledge.write"],
+      knowledgeBaseScope: "all",
+    });
+    expect(clients.find((client) => client.clientId === phone.clientId)?.capabilities).toEqual([
+      "knowledge.read",
+    ]);
 
-    expect(response.statusCode).toBe(200);
-    expect(writeClient).toHaveBeenCalledWith(
-      CHATGPT_CLIENT_ID,
-      expect.objectContaining({
-        accessType: "full",
-        capabilities: [],
-        knowledgeBaseScope: "all",
-        knowledgeBases: [],
-      }),
-      expect.anything(),
-    );
+    const listed = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/integrations",
+      headers: { cookie },
+    });
+    expect(JSON.stringify(listed.json())).not.toContain(codeg.secret);
+    expect(listed.json().integrations[2].credentials).toHaveLength(2);
+
+    const path = `/mcp-console/api/credentials/${codeg.clientId}`;
+    await app.inject({ method: "PUT", url: path, headers, payload: { enabled: false } });
+    expect(await staticTokens.verify(codeg.secret)).toBeUndefined();
+    const redirect = await app.inject({
+      method: "PUT",
+      url: path,
+      headers,
+      payload: { redirectUri: "https://example.com/cb" },
+    });
+    expect(redirect.statusCode).toBe(400);
+    const rotated = (await app.inject({ method: "POST", url: `${path}/rotate-secret`, headers })).json();
+    expect(rotated.secret).toMatch(/^wkmcp_/);
+    const sessions = await app.inject({ method: "POST", url: `${path}/revoke-sessions`, headers });
+    expect(sessions.statusCode).toBe(400);
+
+    expect((await app.inject({ method: "DELETE", url: path, headers })).json()).toEqual({
+      deleted: true,
+    });
+    expect((await app.inject({ method: "DELETE", url: path, headers })).statusCode).toBe(404);
+    expect(await staticTokens.verify(phone.secret)).toBeDefined();
+    expect(JSON.stringify(appendAudit.mock.calls)).not.toContain(codeg.secret);
     await app.close();
   });
 
-  it("rejects unknown clients, capabilities, and knowledge bases", async () => {
-    const { app, writeClient } = createFixture();
+  it("normalizes full access to all knowledge bases and rejects invalid policies", async () => {
+    const { app, writeClient } = await createFixture();
     const cookie = await login(app);
     const token = await csrf(app, cookie);
+    const headers = { cookie, "x-csrf-token": token };
+    const url = `/mcp-console/api/credentials/${CHATGPT_CLIENT_ID}/access-policy`;
     const base = {
       accessType: "capabilities",
       capabilities: ["knowledge.read"],
@@ -361,22 +450,37 @@ describe("MCP console HTTP app", () => {
       defaultKbId: KB_A,
       allowedKbIds: [KB_A],
     };
+
+    const full = await app.inject({
+      method: "PUT",
+      url,
+      headers,
+      payload: { ...base, accessType: "full", capabilities: [], knowledgeBaseScope: "all", allowedKbIds: [] },
+    });
+    expect(full.statusCode).toBe(200);
+    expect(writeClient).toHaveBeenCalledWith(
+      CHATGPT_CLIENT_ID,
+      expect.objectContaining({ accessType: "full", knowledgeBases: [] }),
+      { subject: "user-1", username: "aodo" },
+    );
+    writeClient.mockClear();
+
     const unknownClient = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-admin/access-policy",
-      headers: { cookie, "x-csrf-token": token },
+      url: "/mcp-console/api/credentials/chatgpt-admin/access-policy",
+      headers,
       payload: base,
     });
     const unknownCapability = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
-      headers: { cookie, "x-csrf-token": token },
+      url,
+      headers,
       payload: { ...base, capabilities: ["tenant.root"] },
     });
     const unknownKb = await app.inject({
       method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/access-policy",
-      headers: { cookie, "x-csrf-token": token },
+      url,
+      headers,
       payload: {
         ...base,
         defaultKbId: "0787e321-6f1e-4471-86a9-339165e51644",
@@ -384,110 +488,26 @@ describe("MCP console HTTP app", () => {
       },
     });
 
-    expect(unknownClient.statusCode).toBe(400);
+    expect(unknownClient.statusCode).toBe(404);
     expect(unknownCapability.statusCode).toBe(400);
     expect(unknownKb.statusCode).toBe(400);
     expect(writeClient).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it("keeps OAuth configuration, secret rotation, and session revocation managed", async () => {
-    const { app, appendAudit, oauthClientManager } = createFixture();
+  it("still lists API keys when Keycloak is unavailable", async () => {
+    const { app, oauthClientManager } = await createFixture();
+    oauthClientManager.listClients.mockRejectedValueOnce(new Error("down"));
     const cookie = await login(app);
-    const token = await csrf(app, cookie);
-    const updated = await app.inject({
-      method: "PUT",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read",
-      headers: { cookie, "x-csrf-token": token },
-      payload: {
-        enabled: false,
-        redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
-      },
-    });
-    appendAudit.mockRejectedValueOnce(new Error("audit unavailable"));
-    const rotated = await app.inject({
-      method: "POST",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/rotate-secret",
-      headers: { cookie, "x-csrf-token": token },
-    });
-    const revoked = await app.inject({
-      method: "POST",
-      url: "/mcp-console/api/oauth-clients/chatgpt-read/revoke-sessions",
-      headers: { cookie, "x-csrf-token": token },
+    const response = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/integrations",
+      headers: { cookie },
     });
 
-    expect(updated.statusCode).toBe(200);
-    expect(rotated.json()).toEqual({
-      secret: "new-one-time-secret",
-      oldSecretInvalidated: true,
-    });
-    expect(revoked.json()).toEqual({ revokedSessions: 1 });
-    expect(oauthClientManager.updateManagedClient).toHaveBeenCalledOnce();
-    expect(appendAudit).toHaveBeenCalledTimes(3);
-    await app.close();
-  });
-
-  it("creates, lists, disables, and deletes named API keys", async () => {
-    const { app, appendAudit, oauthClientManager, staticTokens } = createFixture();
-    const cookie = await login(app);
-    const token = await csrf(app, cookie);
-    const headers = { cookie, "x-csrf-token": token };
-    const base = "/mcp-console/api/oauth-clients/api-keys";
-
-    const unnamed = await app.inject({ method: "POST", url: `${base}/keys`, headers, payload: { name: " " } });
-    expect(unnamed.statusCode).toBe(400);
-    const noCsrf = await app.inject({ method: "POST", url: `${base}/keys`, headers: { cookie }, payload: { name: "Codeg" } });
-    expect(noCsrf.statusCode).toBe(403);
-
-    const created = await app.inject({ method: "POST", url: `${base}/keys`, headers, payload: { name: "Codeg" } });
-    expect(created.statusCode).toBe(200);
-    const { key, secret, mcpConfig } = created.json() as {
-      key: { id: string; name: string };
-      secret: string;
-      mcpConfig: unknown;
-    };
-    expect(secret).toMatch(/^wkmcp_/);
-    expect(mcpConfig).toEqual({
-      type: "http",
-      url: "https://wek.uov.me/mcp",
-      headers: { Authorization: `Bearer ${secret}` },
-    });
-    expect(await staticTokens.verify(secret)).toMatchObject({ clientId: TOKEN_CLIENT_ID, keyName: "Codeg" });
-
-    const listed = await app.inject({ method: "GET", url: "/mcp-console/api/oauth-clients", headers: { cookie } });
-    expect(JSON.stringify(listed.json())).not.toContain(secret);
-    expect(listed.json().clients.at(-1)).toMatchObject({
-      enabled: true,
-      keys: [{ id: key.id, name: "Codeg", enabled: true }],
-    });
-
-    const disabled = await app.inject({
-      method: "PUT",
-      url: `${base}/keys/${key.id}`,
-      headers,
-      payload: { enabled: false },
-    });
-    expect(disabled.statusCode).toBe(200);
-    expect(await staticTokens.verify(secret)).toBeUndefined();
-
-    for (const legacy of ["rotate-secret", "revoke-sessions"]) {
-      const response = await app.inject({ method: "POST", url: `${base}/${legacy}`, headers });
-      expect(response.statusCode).toBe(400);
-    }
-    expect(oauthClientManager.rotateManagedClientSecret).not.toHaveBeenCalled();
-
-    const deleted = await app.inject({ method: "DELETE", url: `${base}/keys/${key.id}`, headers });
-    expect(deleted.json()).toEqual({ deleted: true });
-    const missing = await app.inject({ method: "DELETE", url: `${base}/keys/${key.id}`, headers });
-    expect(missing.statusCode).toBe(404);
-    expect(await staticTokens.listKeys(TOKEN_CLIENT_ID)).toEqual([]);
-
-    expect(appendAudit.mock.calls.map((call) => (call as unknown[])[0])).toEqual([
-      "api_key.created",
-      "api_key.updated",
-      "api_key.deleted",
-    ]);
-    expect(JSON.stringify(appendAudit.mock.calls)).not.toContain(secret);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().oauth.unavailable).toBe(true);
+    expect(response.json().integrations[0].credentials[0]).toMatchObject({ exists: false });
     await app.close();
   });
 });

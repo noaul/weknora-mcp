@@ -87,12 +87,16 @@ describe("MCP tool capability catalog", () => {
     });
   });
 
-  it.each(["create_tenant", "list_tenants", "list_sessions"])(
-    "keeps %s full-space-only",
-    (name) => {
-      expect(toolAccessRule(name)).toEqual({ kind: "full" });
-    },
-  );
+  it.each(["create_tenant", "list_tenants"])("requires tenants.manage for %s", (name) => {
+    expect(toolAccessRule(name)).toEqual({ kind: "capability", capabilities: ["tenants.manage"] });
+  });
+
+  it("allows list_sessions with conversation.use (results are filtered per client)", () => {
+    expect(toolAccessRule("list_sessions")).toEqual({
+      kind: "capability",
+      capabilities: ["conversation.use"],
+    });
+  });
 
   it("rejects an unreviewed official tool", () => {
     expect(() =>

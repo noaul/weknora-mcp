@@ -220,93 +220,42 @@ describe("MCP access policy", () => {
     ).rejects.toThrow(/not managed/);
   });
 
-  it("adds newly managed clients to an existing policy with read-only fallback access", async () => {
+  it("adds, renames, and removes clients without backfilling deleted ones", async () => {
     const root = await mkdtemp(join(tmpdir(), "weknora-access-policy-"));
     const policyFile = join(root, "policy.json");
+    const auditFile = join(root, "audit.ndjson");
     await writeFile(policyFile, JSON.stringify(granularPolicy()));
     const store = new FileMcpAccessPolicyStore({
       policyFile,
-      auditFile: join(root, "audit.ndjson"),
+      auditFile,
       fallbackKnowledgeBase: { id: KB_A, name: "镍基合金" },
-      defaultClients: [
-        ...defaultClients,
-        {
-          clientId: "xiaomi-weknora-token",
-          label: "小米手机 WeKnora",
-          provider: "Xiaomi" as const,
-        },
-      ],
+      defaultClients,
     });
+    const actor = { subject: "admin-1", username: "owner@example.com" };
 
-    const policy = await store.read();
-
-    expect(policy.clients.map(({ clientId }) => clientId)).toEqual([
-      "chatgpt-weknora-read",
-      "claude-weknora-read",
-      "xiaomi-weknora-token",
-    ]);
-    expect(policy.clients[0]!.capabilities).toEqual(["knowledge.read", "agents.read"]);
-    expect(policy.clients[2]).toMatchObject({
-      accessType: "capabilities",
+    const fresh = store.defaultAccess({
+      clientId: "apikey-abc123def456",
+      label: "Codeg",
+      provider: "Token",
+    });
+    expect(fresh).toMatchObject({
       capabilities: ["knowledge.read"],
       knowledgeBaseScope: "selected",
-      defaultKbId: KB_A,
       knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
     });
+    await store.addClients([fresh], actor);
+    await expect(store.addClients([fresh], actor)).rejects.toThrow(/already exists/);
+    await store.renameClient("apikey-abc123def456", " Codeg 工作站 ", actor);
+    expect((await store.read()).clients.map(({ clientId, label }) => [clientId, label])).toEqual([
+      ["chatgpt-weknora-read", "ChatGPT"],
+      ["apikey-abc123def456", "Codeg 工作站"],
+    ]);
 
-    await store.writeClient(
-      "xiaomi-weknora-token",
-      {
-        accessType: "capabilities",
-        capabilities: ["knowledge.read"],
-        knowledgeBaseScope: "selected",
-        defaultKbId: KB_B,
-        knowledgeBases: [{ id: KB_B, name: "GH3539" }],
-      },
-      { subject: "admin-1", username: "owner@example.com" },
-    );
-    const persisted = JSON.parse(await readFile(policyFile, "utf8")) as {
-      clients: Array<{ clientId: string; defaultKbId: string }>;
-    };
-    expect(persisted.clients.find(({ clientId }) => clientId === "xiaomi-weknora-token"))
-      .toMatchObject({ defaultKbId: KB_B });
-  });
-
-  it("starts a merged token client with the access of the legacy client it replaces", async () => {
-    const root = await mkdtemp(join(tmpdir(), "weknora-access-policy-"));
-    const policyFile = join(root, "policy.json");
-    const legacy = {
-      ...granularPolicy().clients[0]!,
-      clientId: "xiaomi-weknora-token",
-      label: "小米手机 WeKnora",
-      provider: "Xiaomi",
-      knowledgeBaseScope: "all",
-      knowledgeBases: [],
-    };
-    await writeFile(
-      policyFile,
-      JSON.stringify({ ...granularPolicy(), clients: [...granularPolicy().clients, legacy] }),
-    );
-    const store = new FileMcpAccessPolicyStore({
-      policyFile,
-      auditFile: join(root, "audit.ndjson"),
-      fallbackKnowledgeBase: { id: KB_A, name: "镍基合金" },
-      defaultClients: [
-        ...defaultClients,
-        { clientId: "token-weknora", label: "Key 访问", provider: "Token" as const },
-      ],
-      inheritFrom: { "token-weknora": ["xiaomi-weknora-token"] },
-    });
-
-    const merged = (await store.read()).clients.find(
-      ({ clientId }) => clientId === "token-weknora",
-    );
-
-    expect(merged).toMatchObject({
-      label: "Key 访问",
-      provider: "Token",
-      capabilities: ["knowledge.read", "agents.read"],
-      knowledgeBaseScope: "all",
-    });
+    await store.removeClients(["chatgpt-weknora-read", "apikey-abc123def456"], actor);
+    expect((await store.read()).clients).toEqual([]);
+    const audit = await readFile(auditFile, "utf8");
+    expect(audit).toContain("mcp_client.created");
+    expect(audit).toContain("mcp_client.renamed");
+    expect(audit).toContain("mcp_client.deleted");
   });
 });
