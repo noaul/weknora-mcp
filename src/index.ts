@@ -5,9 +5,11 @@ import { FileMcpAccessPolicyStore } from "./access-policy.js";
 import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
-import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
+import { MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
 import { retry } from "./retry.js";
-import { compareToolBaseline, type ToolBaseline } from "./tool-baseline.js";
+import { FileSessionOwnershipStore } from "./session-ownership.js";
+import { createCombinedTokenVerifier, FileStaticTokenStore } from "./static-tokens.js";
+import { selectBaselineTools, type ToolBaseline } from "./tool-baseline.js";
 import { OfficialWeKnoraMcpClient } from "./upstream-client.js";
 
 async function main(): Promise<void> {
@@ -30,25 +32,25 @@ async function main(): Promise<void> {
     await readFile(resolve("fixtures/upstream-admin-tools-baseline.json"), "utf8"),
   ) as ToolBaseline;
   const liveTools = await upstream.listTools();
-  const baselineErrors = compareToolBaseline(baseline, liveTools, {
-    rejectUnexpected: true,
-  });
-  if (baselineErrors.length > 0) {
-    throw new Error(baselineErrors.join("\n"));
+  const { tools, errors: baselineErrors } = selectBaselineTools(baseline, liveTools);
+  // Changed or unreviewed upstream tools fail closed individually instead of
+  // taking the whole gateway down after an upstream upgrade.
+  for (const error of baselineErrors) {
+    console.warn(`Upstream tool baseline mismatch, tool hidden: ${error}`);
+  }
+  if (tools.length === 0) {
+    throw new Error("No upstream tool matches the reviewed baseline");
   }
 
-  const liveByName = new Map(liveTools.map((tool) => [tool.name, tool]));
-  const tools = baseline.tools.map((tool) => {
-    const live = liveByName.get(tool.name);
-    if (!live) throw new Error(`Missing upstream tool: ${tool.name}`);
-    return live;
-  });
-
-  const verifyToken = createRemoteJwtAccessTokenVerifier({
-    issuer: config.oauthIssuer.toString().replace(/\/$/, ""),
-    audience: config.publicMcpUrl.toString(),
-    requiredScope: config.oauthRequiredScope,
-    jwksUrl: config.oauthJwksUrl,
+  const verifyToken = createCombinedTokenVerifier({
+    staticTokens: new FileStaticTokenStore({ file: config.staticTokenFile }),
+    oauth: createRemoteJwtAccessTokenVerifier({
+      issuer: config.oauthIssuer.toString().replace(/\/$/, ""),
+      audience: config.publicMcpUrl.toString(),
+      requiredScope: config.oauthRequiredScope,
+      jwksUrl: config.oauthJwksUrl,
+    }),
+    scope: config.oauthRequiredScope,
   });
   const app = buildApp({
     config,
@@ -62,10 +64,9 @@ async function main(): Promise<void> {
         id: config.fallbackKbId,
         name: config.fallbackKbName,
       },
-      defaultClients: MANAGED_OAUTH_CLIENTS.map(
-        ({ clientId, label, provider }) => ({ clientId, label, provider }),
-      ),
+      defaultClients: MANAGED_ACCESS_CLIENTS,
     }),
+    sessions: new FileSessionOwnershipStore({ file: config.sessionOwnershipFile }),
   });
 
   const shutdown = async (signal: string) => {

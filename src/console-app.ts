@@ -21,6 +21,7 @@ import type {
   ManagedOAuthClientUpdate,
 } from "./keycloak-admin.js";
 import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
+import { MANAGED_TOKEN_CLIENTS, type FileStaticTokenStore } from "./static-tokens.js";
 import type { WeKnoraKnowledgeBase } from "./weknora-api.js";
 
 const SESSION_COOKIE = "weknora_console_session";
@@ -119,6 +120,7 @@ export interface BuildConsoleAppOptions {
     | "rotateManagedClientSecret"
     | "revokeManagedClientSessions"
   >;
+  staticTokens: Pick<FileStaticTokenStore, "status" | "rotate" | "setEnabled" | "revoke">;
   weknora: { listKnowledgeBases(): Promise<WeKnoraKnowledgeBase[]> };
   checkServices(): Promise<Record<string, "healthy" | "unavailable">>;
   indexHtml: string;
@@ -128,12 +130,16 @@ export interface BuildConsoleAppOptions {
 }
 
 const oauthClientParamsSchema = z.object({
-  key: z.enum(["chatgpt-read", "claude-read"]),
+  key: z.enum(["chatgpt-read", "claude-read", "xiaomi-token"]),
 });
 
 const clientIdByKey = new Map(
-  MANAGED_OAUTH_CLIENTS.map(({ key, clientId }) => [key, clientId]),
+  [...MANAGED_OAUTH_CLIENTS, ...MANAGED_TOKEN_CLIENTS].map(({ key, clientId }) => [
+    key,
+    clientId,
+  ]),
 );
+const tokenClientByKey = new Map(MANAGED_TOKEN_CLIENTS.map((client) => [client.key, client]));
 
 const oauthClientUpdateSchema = z
   .strictObject({
@@ -321,21 +327,39 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   app.get("/mcp-console/api/oauth-clients", async (request, reply) => {
     if (!(await requireSession(request, reply))) return;
     try {
-      const [clients, policy] = await Promise.all([
+      const [clients, policy, tokenStatuses] = await Promise.all([
         options.oauthClientManager.listManagedClients(),
         options.accessPolicyStore.read(),
+        Promise.all(
+          MANAGED_TOKEN_CLIENTS.map(({ clientId }) => options.staticTokens.status(clientId)),
+        ),
       ]);
+      const accessFor = (clientId: string) => {
+        const access = policy.clients.find((client) => client.clientId === clientId);
+        if (!access) throw new Error(`OAuth client ${clientId} has no access policy`);
+        return access;
+      };
       return {
         capabilities: MCP_CAPABILITIES,
-        clients: clients.map((client) => {
-          const access = policy.clients.find(
-            ({ clientId }) => clientId === client.clientId,
-          );
-          if (!access) {
-            throw new Error(`OAuth client ${client.clientId} has no access policy`);
-          }
-          return { ...client, access };
-        }),
+        clients: [
+          ...clients.map((client) => ({
+            ...client,
+            kind: "oauth" as const,
+            access: accessFor(client.clientId),
+          })),
+          ...MANAGED_TOKEN_CLIENTS.map((client, index) => {
+            const status = tokenStatuses[index]!;
+            return {
+              ...client,
+              kind: "token" as const,
+              enabled: status.enabled,
+              hasToken: status.hasToken,
+              tokenCreatedAt: status.createdAt ?? null,
+              sessionCount: 0,
+              access: accessFor(client.clientId),
+            };
+          }),
+        ],
       };
     } catch (error) {
       request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
@@ -402,6 +426,26 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     if (!params.success || !update.success) {
       return reply.code(400).send({ error: "invalid_oauth_client_update" });
     }
+    const tokenClient = tokenClientByKey.get(params.data.key);
+    if (tokenClient) {
+      if (update.data.redirectUri !== undefined || update.data.enabled === undefined) {
+        return reply.code(400).send({ error: "invalid_oauth_client_update" });
+      }
+      try {
+        const status = await options.staticTokens.setEnabled(
+          tokenClient.clientId,
+          update.data.enabled,
+        );
+        await recordAudit(request, "static_token.updated", session, {
+          key: tokenClient.key,
+          enabled: status.enabled,
+        });
+        return { client: { key: tokenClient.key, ...status } };
+      } catch (error) {
+        request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
+        return reply.code(409).send({ error: "static_token_missing" });
+      }
+    }
     try {
       const client = await options.oauthClientManager.updateManagedClient(
         params.data.key,
@@ -433,6 +477,15 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       if (!params.success) {
         return reply.code(400).send({ error: "invalid_oauth_client" });
       }
+      const tokenClient = tokenClientByKey.get(params.data.key);
+      if (tokenClient) {
+        const result = await options.staticTokens.rotate(tokenClient.clientId);
+        await recordAudit(request, "static_token.rotated", session, {
+          key: tokenClient.key,
+          oldTokenInvalidated: result.replacedExisting,
+        });
+        return { secret: result.token, oldSecretInvalidated: result.replacedExisting };
+      }
       try {
         const result = await options.oauthClientManager.rotateManagedClientSecret(
           params.data.key,
@@ -462,6 +515,15 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       const params = oauthClientParamsSchema.safeParse(request.params);
       if (!params.success) {
         return reply.code(400).send({ error: "invalid_oauth_client" });
+      }
+      const tokenClient = tokenClientByKey.get(params.data.key);
+      if (tokenClient) {
+        const result = await options.staticTokens.revoke(tokenClient.clientId);
+        await recordAudit(request, "static_token.revoked", session, {
+          key: tokenClient.key,
+          revoked: result.revoked,
+        });
+        return { revokedSessions: result.revoked ? 1 : 0 };
       }
       try {
         const result = await options.oauthClientManager.revokeManagedClientSessions(

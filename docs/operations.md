@@ -20,7 +20,9 @@ The gateway and console use independent release, configuration, and state paths.
 - Gateway environment/token: `/etc/weknora-mcp-access-gateway/`
 - Keycloak environment: `/opt/weknora-mcp-access-gateway/deploy/keycloak.env`
 - Console environment/secrets: `/etc/weknora-mcp-console/`
-- Access policy and audit state: `/var/lib/weknora-mcp-console/`
+- Access policy, audit, and static-token hashes: `/var/lib/weknora-mcp-console/`
+- Gateway session ownership: `/var/lib/weknora-mcp-access-gateway/` (systemd
+  `StateDirectory`)
 - Approved server-local imports: `/var/lib/weknora-mcp-import/`
 
 Environment and secret files are root-owned and never committed. The official
@@ -92,8 +94,20 @@ deploy/scripts/probe.sh
 ```
 
 After every official MCP or WeKnora upgrade, rerun the full tests and baseline
-check. The gateway rejects missing, changed, or newly added upstream tools until
-the reviewed baseline and capability catalog are updated together.
+check. At startup the gateway hides every upstream tool that is missing, has a
+changed input schema, or is not in the reviewed baseline, and logs one
+`Upstream tool baseline mismatch` warning per tool. The other reviewed tools
+remain available. Review the warnings, then update the baseline and capability
+catalog together.
+
+The baseline describes the `mcp-server` source of Tencent/WeKnora v0.8.2. It
+also accepts the older schemas published as `tencent-weknora-mcp` 1.1.1 on
+PyPI, so the gateway works with either upstream. `update_knowledge_from_text`
+exists only in the newer source.
+
+```bash
+journalctl -u weknora-mcp-access-gateway -b | grep 'baseline mismatch'
+```
 
 ## Rotation
 
@@ -101,6 +115,10 @@ Rotate the upstream bearer token by updating the official MCP environment and
 gateway token file together, then restart both services. Rotate ChatGPT or
 Claude Client Secrets through the console and immediately update the matching
 web connector with the one-time value.
+
+Rotate, disable, or revoke a static-token client (for example
+`xiaomi-weknora-token`) in the console. The gateway reads the token file on
+every request, so the change applies immediately.
 
 Disabling a client or revoking its Keycloak sessions does not invalidate an
 already issued JWT until that token expires. The current realm access-token

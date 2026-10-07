@@ -19,10 +19,10 @@ import {
   PolicyError,
   prepareUpstreamToolCall,
 } from "./policy.js";
+import type { SessionOwnershipStore } from "./session-ownership.js";
 import {
   assertReviewedToolCatalog,
   toolAccessRule,
-  type ResourceScope,
   type ToolAccessRule,
 } from "./tool-capabilities.js";
 import type { ToolCaller } from "./upstream-client.js";
@@ -33,6 +33,7 @@ export interface UnifiedGatewayServerOptions {
   tools: Tool[];
   importRoot: string;
   upstream: ToolCaller;
+  sessions: SessionOwnershipStore;
 }
 
 const RETRIEVAL_TOOL_NAMES = new Set<string>(ALLOWED_TOOL_NAMES);
@@ -241,28 +242,75 @@ function assertKnowledgeBaseArguments(
   }
 }
 
-async function preflightResource(
-  scope: ResourceScope,
+function scopedConversationArguments(
+  client: ClientAccessPolicy,
+  rule: ToolAccessRule,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  // WeKnora searches agent or tenant defaults when knowledge_base_ids is
+  // omitted, so a selected-scope client is pinned to its allow-list.
+  if (
+    client.accessType === "full" ||
+    client.knowledgeBaseScope !== "selected" ||
+    rule.kind !== "capability" ||
+    rule.kbArgument !== "knowledge_base_ids"
+  ) {
+    return args;
+  }
+  const kbIds = args.knowledge_base_ids;
+  if (Array.isArray(kbIds) && kbIds.length > 0) return args;
+  return {
+    ...args,
+    knowledge_base_ids: client.knowledgeBases.map(({ id }) => id),
+  };
+}
+
+async function preflightKnowledge(
   args: Record<string, unknown>,
   client: ClientAccessPolicy,
   upstream: ToolCaller,
 ): Promise<CallToolResult> {
-  const resourceArgument = scope === "knowledge" ? "knowledge_id" : "session_id";
-  const resourceId = args[resourceArgument];
-  if (typeof resourceId !== "string" || resourceId.length === 0) {
-    throw new PolicyError(`${resourceArgument} must be provided`);
+  const knowledgeId = args.knowledge_id;
+  if (typeof knowledgeId !== "string" || knowledgeId.length === 0) {
+    throw new PolicyError("knowledge_id must be provided");
   }
-  const inspectionTool = scope === "knowledge" ? "get_knowledge" : "get_session";
   const result = await upstream.callTool({
-    name: inspectionTool,
-    arguments: { [resourceArgument]: resourceId },
+    name: "get_knowledge",
+    arguments: { knowledge_id: knowledgeId },
   });
   const kbId = findKnowledgeBaseId(parseResultJson(result));
   if (!kbId) {
-    throw new PolicyError(`Cannot determine the ${scope} knowledge base`);
+    throw new PolicyError("Cannot determine the knowledge base of this knowledge entry");
   }
   assertAllowedKnowledgeBase(client, kbId);
   return result;
+}
+
+async function preflightSession(
+  args: Record<string, unknown>,
+  client: ClientAccessPolicy,
+  sessions: SessionOwnershipStore,
+): Promise<void> {
+  const sessionId = args.session_id;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new PolicyError("session_id must be provided");
+  }
+  if ((await sessions.owner(sessionId)) !== client.clientId) {
+    throw new PolicyError(`Session ${sessionId} was not created by this OAuth client`);
+  }
+}
+
+function createdSessionId(result: CallToolResult): string | undefined {
+  if (result.isError) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = parseResultJson(result);
+  } catch {
+    return undefined;
+  }
+  const record = objectRecord(parsed);
+  const data = objectRecord(record?.data) ?? record;
+  return typeof data?.id === "string" && data.id.length > 0 ? data.id : undefined;
 }
 
 export function createUnifiedGatewayMcpServer(
@@ -306,34 +354,35 @@ export function createUnifiedGatewayMcpServer(
       }
 
       assertKnowledgeBaseArguments(client, rule, args);
-      let inspected: CallToolResult | undefined;
       if (
         client.accessType !== "full" &&
         rule.kind === "capability" &&
         rule.resourceScope
       ) {
-        inspected = await preflightResource(
-          rule.resourceScope,
-          args,
-          client,
-          options.upstream,
-        );
-        if (
-          (rule.resourceScope === "knowledge" && name === "get_knowledge") ||
-          (rule.resourceScope === "session" && name === "get_session")
-        ) {
-          return inspected;
+        if (rule.resourceScope === "session") {
+          await preflightSession(args, client, options.sessions);
+        } else {
+          const inspected = await preflightKnowledge(args, client, options.upstream);
+          if (name === "get_knowledge") return inspected;
         }
       }
 
       const allowedToolNames = new Set(visibleTools(client, options.tools).map(({ name }) => name));
       const call = await prepareAdminToolCall({
         name,
-        arguments: args,
+        arguments: scopedConversationArguments(client, rule, args),
         allowedToolNames,
         importRoot: options.importRoot,
       });
-      return await options.upstream.callTool(call);
+      const result = await options.upstream.callTool(call);
+      if (name === "create_session") {
+        const sessionId = createdSessionId(result);
+        if (sessionId) await options.sessions.record(sessionId, client.clientId);
+      }
+      if (name === "delete_session" && !result.isError) {
+        await options.sessions.forget(args.session_id as string);
+      }
+      return result;
     } catch (error) {
       return policyErrorResult(error);
     }

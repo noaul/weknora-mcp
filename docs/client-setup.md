@@ -62,6 +62,24 @@ callbacks and secrets are preserved during the unified-client migration.
 4. Complete the Keycloak login and consent flow.
 5. Reconnect or refresh tools after changing permissions.
 
+## Xiaomi phone (static token)
+
+The Xiaomi phone MCP settings accept only a name, a server URL, and an optional
+Auth Token, so this client uses a static Bearer token instead of OAuth.
+
+1. In the management console, open `小米手机 WeKnora` (`xiaomi-weknora-token`),
+   choose its capabilities and knowledge bases, and apply the MCP permissions.
+2. Click `生成 Token` and copy the one-time `wkmcp_…` value.
+3. On the phone, add an MCP service: any name, server URL
+   `https://wek.uov.me/mcp`, and the token as Auth Token. Both `wkmcp_…` and
+   `Bearer wkmcp_…` are accepted.
+4. Use `轮换 Token` to replace a leaked token, the enable switch to pause it, or
+   `撤销 Token` to delete it. Changes apply to the next request.
+
+A static token does not expire. Keep this client on the smallest capability set
+and knowledge-base allow-list it needs; read-only `knowledge.read` is the
+default.
+
 ## Permission choices
 
 按能力 mode exposes only tools mapped to the selected capability groups. The
@@ -71,6 +89,13 @@ one knowledge base and a default inside that allow-list.
 全权限 mode exposes the complete reviewed official tool baseline and all
 knowledge bases. Destructive tools remain marked destructive, but clients can
 present confirmations differently. Assign this mode only to trusted clients.
+
+Since WeKnora v0.8 a chat session is not bound to a knowledge base. In 按能力
+mode the gateway therefore records which client created each session; a client
+can read, chat in, or delete only its own sessions. When a selected-scope client
+calls `chat` or `agent_chat` without `knowledge_base_ids`, the gateway fills in
+the client's allow-list. A custom agent may still have its own knowledge-base
+configuration in WeKnora, so grant `agents.read` only where that is acceptable.
 
 ## File ingestion
 

@@ -14,7 +14,8 @@ describe("console assets", () => {
     expect(html).toContain('id="audit-list"');
     expect(html).toContain('id="oauth-client-list"');
     expect(html).toContain('id="oauth-secret-dialog"');
-    expect(html).toContain("OAuth 客户端");
+    expect(html).toContain("MCP 客户端");
+    expect(html).toContain('id="oauth-secret-title"');
     expect(html).toContain("按能力授权");
     expect(html).toContain("全权限");
     expect(html).toContain("知识库范围");
@@ -30,6 +31,8 @@ describe("console assets", () => {
     expect(script).toContain("models.manage");
     expect(script).toContain("rotate-secret");
     expect(script).toContain("revoke-sessions");
+    expect(script).toContain('client.kind === "token"');
+    expect(script).toContain("撤销 Token");
     expect(script).toContain("x-csrf-token");
     expect(`${html}${script}`).not.toContain("must-not-leak");
     expect(`${html}${script}`).not.toContain("mcp-admin");

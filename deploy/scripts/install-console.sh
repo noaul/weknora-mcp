@@ -59,6 +59,8 @@ ensure_env_setting MCP_ACCESS_POLICY_FILE \
 ensure_env_setting MCP_AUDIT_FILE \
   /var/lib/weknora-mcp-console/audit.ndjson
 ensure_env_setting GATEWAY_HEALTH_URL http://127.0.0.1:18194/readyz
+ensure_env_setting MCP_STATIC_TOKEN_FILE \
+  /var/lib/weknora-mcp-console/static-tokens.json
 
 systemctl daemon-reload
 echo "Unified MCP console, policy, and import directories installed. Add the four secret files before starting the service."

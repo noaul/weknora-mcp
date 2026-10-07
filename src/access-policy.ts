@@ -26,7 +26,7 @@ const knowledgeBaseChoiceSchema = z.strictObject({
 const managedClientSchema = z.strictObject({
   clientId: z.string().trim().min(1).max(200),
   label: z.string().trim().min(1).max(200),
-  provider: z.enum(["ChatGPT", "Claude"]),
+  provider: z.enum(["ChatGPT", "Claude", "Xiaomi"]),
 });
 
 const clientAccessPolicySchema = managedClientSchema
@@ -219,7 +219,7 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
     ) {
       return this.migrate(value);
     }
-    return parseMcpAccessPolicy(value);
+    return this.withDefaultClients(parseMcpAccessPolicy(value));
   }
 
   async writeClient(
@@ -276,6 +276,27 @@ export class FileMcpAccessPolicyStore implements McpAccessPolicyProvider {
       }
       throw new McpAccessPolicyError("MCP access-policy audit file is not valid");
     }
+  }
+
+  /**
+   * Clients added to the gateway after the policy file was written start with
+   * read-only access to the fallback knowledge base until an admin edits them.
+   */
+  private withDefaultClients(policy: McpAccessPolicy): McpAccessPolicy {
+    const known = new Set(policy.clients.map(({ clientId }) => clientId));
+    const missing = this.defaultClients.filter(({ clientId }) => !known.has(clientId));
+    if (missing.length === 0) return policy;
+    return parseMcpAccessPolicy({
+      ...policy,
+      clients: [
+        ...policy.clients,
+        ...missing.map((client) =>
+          migratedClient(client, this.fallbackKnowledgeBase.id, [
+            this.fallbackKnowledgeBase,
+          ]),
+        ),
+      ],
+    });
   }
 
   private migrate(value: unknown): McpAccessPolicy {

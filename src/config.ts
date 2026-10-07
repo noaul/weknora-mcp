@@ -23,6 +23,14 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default("/var/lib/weknora-mcp-console/audit.ndjson"),
+  MCP_STATIC_TOKEN_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/static-tokens.json"),
+  MCP_SESSION_OWNERSHIP_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-access-gateway/session-owners.json"),
   ADMIN_IMPORT_ROOT: z.string().min(1),
   ALLOWED_ORIGINS: z.string().default(""),
   RATE_LIMIT_IP_PER_MINUTE: z.coerce.number().int().positive().default(120),
@@ -52,6 +60,8 @@ export interface GatewayConfig {
   fallbackKbName: string;
   accessPolicyFile: string;
   auditFile: string;
+  staticTokenFile: string;
+  sessionOwnershipFile: string;
   importRoot: string;
   allowedOrigins: string[];
   rateLimitIpPerMinute: number;
@@ -117,6 +127,8 @@ export function parseConfig(env: NodeJS.ProcessEnv | Record<string, string>): Ga
     fallbackKbName: parsed.data.FALLBACK_KB_NAME,
     accessPolicyFile: parsed.data.MCP_ACCESS_POLICY_FILE,
     auditFile: parsed.data.MCP_AUDIT_FILE,
+    staticTokenFile: parsed.data.MCP_STATIC_TOKEN_FILE,
+    sessionOwnershipFile: parsed.data.MCP_SESSION_OWNERSHIP_FILE,
     importRoot: parsed.data.ADMIN_IMPORT_ROOT,
     allowedOrigins: parsed.data.ALLOWED_ORIGINS.split(",")
       .map((origin) => origin.trim())

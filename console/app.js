@@ -34,6 +34,8 @@ const elements = {
   confirmAction: document.querySelector("#oauth-confirm-action"),
   secretDialog: document.querySelector("#oauth-secret-dialog"),
   secretValue: document.querySelector("#oauth-secret-value"),
+  secretTitle: document.querySelector("#oauth-secret-title"),
+  secretLabel: document.querySelector("#oauth-secret-label"),
   copySecret: document.querySelector("#copy-oauth-secret"),
 };
 
@@ -431,6 +433,10 @@ async function saveOauthClient(client, draft) {
   await loadAll();
 }
 
+function secretName(client) {
+  return client.kind === "token" ? "Auth Token" : "Client Secret";
+}
+
 async function rotateSecret(client) {
   const result = await request(
     `/mcp-console/api/oauth-clients/${client.key}/rotate-secret`,
@@ -439,9 +445,68 @@ async function rotateSecret(client) {
       headers: { "x-csrf-token": state.session.csrfToken },
     },
   );
+  elements.secretTitle.textContent = `新 ${secretName(client)}`;
+  elements.secretLabel.textContent = secretName(client);
   elements.secretValue.value = result.secret;
   elements.secretDialog.showModal();
-  showStatus(`${client.label} Client Secret 已轮换`);
+  showStatus(`${client.label} ${secretName(client)} 已生成`);
+  if (client.kind === "token") await loadAll();
+}
+
+async function saveTokenClient(client, draft) {
+  await request(`/mcp-console/api/oauth-clients/${client.key}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-csrf-token": state.session.csrfToken,
+    },
+    body: JSON.stringify({ enabled: draft.enabled }),
+  });
+  showStatus(`${client.label} Token 已${draft.enabled ? "启用" : "停用"}`);
+  await loadAll();
+}
+
+function renderTokenConnection(card, client, draft) {
+  const connection = document.createElement("section");
+  connection.className = "client-section";
+  const heading = document.createElement("div");
+  heading.className = "section-title-row";
+  appendText(heading, "h3", "", "连接信息");
+  appendText(
+    heading,
+    "span",
+    "section-note",
+    client.hasToken ? `Token 生成于 ${formatDate(client.tokenCreatedAt)}` : "尚未生成 Token",
+  );
+  connection.append(heading);
+  const grid = document.createElement("div");
+  grid.className = "connection-grid";
+  appendField(grid, "服务器 URL", client.mcpUrl);
+  appendField(grid, "认证方式", "静态 Bearer Token");
+  appendField(grid, "Auth Token", client.hasToken ? "已生成（不可再次查看）" : "未生成");
+  appendField(grid, "Provider", client.provider);
+  connection.append(grid);
+  appendText(
+    connection,
+    "p",
+    "muted",
+    "在客户端的 MCP 服务中填写：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
+  );
+  const row = document.createElement("div");
+  row.className = "client-actions";
+  const save = appendText(row, "button", "button button-primary", "保存启用状态");
+  save.type = "button";
+  save.disabled = !client.hasToken;
+  save.addEventListener("click", () =>
+    confirmAction(
+      `更新 ${client.label} 状态`,
+      draft.enabled ? "将启用该 Token。" : "将停用该 Token，客户端请求会被拒绝。",
+      "确认保存",
+      () => saveTokenClient(client, draft),
+    ),
+  );
+  connection.append(row);
+  card.append(connection);
 }
 
 async function revokeSessions(client) {
@@ -452,7 +517,11 @@ async function revokeSessions(client) {
       headers: { "x-csrf-token": state.session.csrfToken },
     },
   );
-  showStatus(`已撤销 ${result.revokedSessions} 个 ${client.label} 会话`);
+  showStatus(
+    client.kind === "token"
+      ? `${client.label} Token 已撤销`
+      : `已撤销 ${result.revokedSessions} 个 ${client.label} 会话`,
+  );
   await loadAll();
 }
 
@@ -479,8 +548,17 @@ function renderClient(client) {
     enabledText.textContent = draft.enabled ? "已启用" : "已停用";
   });
   toggle.append(enabled, enabledText);
+  enabled.disabled = client.kind === "token" && !client.hasToken;
   header.append(title, toggle);
   card.append(header);
+
+  if (client.kind === "token") {
+    renderTokenConnection(card, client, draft);
+    renderCapabilityControls(card, client, draft);
+    renderKnowledgeControls(card, client, draft);
+    card.append(renderFooter(client, draft));
+    return card;
+  }
 
   const connection = document.createElement("section");
   connection.className = "client-section";
@@ -532,7 +610,12 @@ function renderClient(client) {
 
   renderCapabilityControls(card, client, draft);
   renderKnowledgeControls(card, client, draft);
+  card.append(renderFooter(client, draft));
+  return card;
+}
 
+function renderFooter(client, draft) {
+  const token = client.kind === "token";
   const footer = document.createElement("footer");
   footer.className = "client-footer";
   appendText(
@@ -556,29 +639,39 @@ function renderClient(client) {
       () => saveAccessPolicy(client, draft),
     ),
   );
-  const rotate = appendText(actions, "button", "button button-quiet", "轮换 Secret");
+  const rotateLabel = token ? (client.hasToken ? "轮换 Token" : "生成 Token") : "轮换 Secret";
+  const rotate = appendText(actions, "button", "button button-quiet", rotateLabel);
   rotate.type = "button";
   rotate.addEventListener("click", () =>
     confirmAction(
-      `轮换 ${client.label} Client Secret`,
-      "现有 Client Secret 将失效，新密钥只显示一次。",
-      "确认轮换",
+      `${rotateLabel}：${client.label}`,
+      token
+        ? "现有 Token（如有）将立即失效，新 Token 只显示一次。"
+        : "现有 Client Secret 将失效，新密钥只显示一次。",
+      "确认生成",
       () => rotateSecret(client),
     ),
   );
-  const revoke = appendText(actions, "button", "button button-quiet", "撤销会话");
+  const revoke = appendText(
+    actions,
+    "button",
+    "button button-quiet",
+    token ? "撤销 Token" : "撤销会话",
+  );
   revoke.type = "button";
+  revoke.disabled = token && !client.hasToken;
   revoke.addEventListener("click", () =>
     confirmAction(
-      `撤销 ${client.label} 会话`,
-      `将撤销当前 ${client.sessionCount} 个活跃会话。`,
+      token ? `撤销 ${client.label} Token` : `撤销 ${client.label} 会话`,
+      token
+        ? "Token 将被删除，客户端需重新填写新 Token 才能使用。"
+        : `将撤销当前 ${client.sessionCount} 个活跃会话。`,
       "确认撤销",
       () => revokeSessions(client),
     ),
   );
   footer.append(actions);
-  card.append(footer);
-  return card;
+  return footer;
 }
 
 function renderClients() {
@@ -644,7 +737,7 @@ elements.confirmDialog.addEventListener("close", async () => {
 });
 elements.copySecret.addEventListener("click", async () => {
   await navigator.clipboard.writeText(elements.secretValue.value);
-  showStatus("Client Secret 已复制");
+  showStatus(`${elements.secretLabel.textContent} 已复制`);
 });
 elements.secretDialog.addEventListener("close", () => {
   elements.secretValue.value = "";

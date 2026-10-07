@@ -53,6 +53,11 @@ describe("MCP tool capability catalog", () => {
       capabilities: ["knowledge.read"],
       resourceScope: "knowledge",
     });
+    expect(toolAccessRule("update_knowledge_from_text")).toEqual({
+      kind: "capability",
+      capabilities: ["knowledge.write"],
+      resourceScope: "knowledge",
+    });
     expect(toolAccessRule("delete_chunk")).toEqual({
       kind: "capability",
       capabilities: ["knowledge.write"],

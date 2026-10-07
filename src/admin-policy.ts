@@ -11,6 +11,8 @@ const DESTRUCTIVE_TOOLS = new Set([
   "delete_knowledge",
   "delete_session",
   "delete_chunk",
+  // Overwrites the existing content of a manual knowledge entry.
+  "update_knowledge_from_text",
 ]);
 
 const READ_ONLY_TOOLS = new Set([

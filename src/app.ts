@@ -18,6 +18,7 @@ import {
   buildWwwAuthenticate,
 } from "./metadata.js";
 import { SlidingWindowLimiter } from "./rate-limit.js";
+import type { SessionOwnershipStore } from "./session-ownership.js";
 import { createUnifiedGatewayMcpServer } from "./unified-gateway-server.js";
 import type { ToolCaller } from "./upstream-client.js";
 
@@ -27,11 +28,20 @@ export interface BuildAppOptions {
   upstream: ToolCaller;
   tools: Tool[];
   accessPolicy: McpAccessPolicyProvider;
+  sessions: SessionOwnershipStore;
 }
 
-function bearerToken(header: string | undefined): string | undefined {
-  const match = /^Bearer\s+(.+)$/i.exec(header ?? "");
-  return match?.[1]?.trim();
+/**
+ * Accepts "Bearer <token>" and, for clients whose settings ask for the full
+ * header value but add their own scheme, "Bearer Bearer <token>" or a bare
+ * token.
+ */
+export function bearerToken(header: string | undefined): string | undefined {
+  let value = (header ?? "").trim();
+  while (/^Bearer\s+/i.test(value)) value = value.replace(/^Bearer\s+/i, "").trim();
+  return value.length > 0 && !/\s/.test(value) && !/^Bearer$/i.test(value)
+    ? value
+    : undefined;
 }
 
 function toolName(body: unknown): string | undefined {
@@ -200,6 +210,7 @@ export function buildApp(options: BuildAppOptions) {
       tools: options.tools,
       importRoot: options.config.importRoot,
       upstream: options.upstream,
+      sessions: options.sessions,
     });
 
     reply.hijack();

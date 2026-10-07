@@ -219,4 +219,56 @@ describe("MCP access policy", () => {
       ),
     ).rejects.toThrow(/not managed/);
   });
+
+  it("adds newly managed clients to an existing policy with read-only fallback access", async () => {
+    const root = await mkdtemp(join(tmpdir(), "weknora-access-policy-"));
+    const policyFile = join(root, "policy.json");
+    await writeFile(policyFile, JSON.stringify(granularPolicy()));
+    const store = new FileMcpAccessPolicyStore({
+      policyFile,
+      auditFile: join(root, "audit.ndjson"),
+      fallbackKnowledgeBase: { id: KB_A, name: "镍基合金" },
+      defaultClients: [
+        ...defaultClients,
+        {
+          clientId: "xiaomi-weknora-token",
+          label: "小米手机 WeKnora",
+          provider: "Xiaomi" as const,
+        },
+      ],
+    });
+
+    const policy = await store.read();
+
+    expect(policy.clients.map(({ clientId }) => clientId)).toEqual([
+      "chatgpt-weknora-read",
+      "claude-weknora-read",
+      "xiaomi-weknora-token",
+    ]);
+    expect(policy.clients[0]!.capabilities).toEqual(["knowledge.read", "agents.read"]);
+    expect(policy.clients[2]).toMatchObject({
+      accessType: "capabilities",
+      capabilities: ["knowledge.read"],
+      knowledgeBaseScope: "selected",
+      defaultKbId: KB_A,
+      knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+    });
+
+    await store.writeClient(
+      "xiaomi-weknora-token",
+      {
+        accessType: "capabilities",
+        capabilities: ["knowledge.read"],
+        knowledgeBaseScope: "selected",
+        defaultKbId: KB_B,
+        knowledgeBases: [{ id: KB_B, name: "GH3539" }],
+      },
+      { subject: "admin-1", username: "owner@example.com" },
+    );
+    const persisted = JSON.parse(await readFile(policyFile, "utf8")) as {
+      clients: Array<{ clientId: string; defaultKbId: string }>;
+    };
+    expect(persisted.clients.find(({ clientId }) => clientId === "xiaomi-weknora-token"))
+      .toMatchObject({ defaultKbId: KB_B });
+  });
 });

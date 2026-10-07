@@ -11,6 +11,10 @@ import type {
   ClientAccessPolicy,
   McpAccessPolicyProvider,
 } from "../src/access-policy.js";
+import {
+  MemorySessionOwnershipStore,
+  type SessionOwnershipStore,
+} from "../src/session-ownership.js";
 import { createUnifiedGatewayMcpServer } from "../src/unified-gateway-server.js";
 import type { ToolCaller } from "../src/upstream-client.js";
 
@@ -103,6 +107,7 @@ async function connect(options: {
   tools?: Tool[];
   upstream?: ToolCaller;
   importRoot?: string;
+  sessions?: SessionOwnershipStore;
 }) {
   const upstream: ToolCaller = options.upstream ?? {
     callTool: vi.fn(async () => ({ content: [] })),
@@ -113,6 +118,7 @@ async function connect(options: {
     tools: options.tools ?? reviewedTools,
     importRoot: options.importRoot ?? (await mkdtemp(join(tmpdir(), "weknora-import-"))),
     upstream,
+    sessions: options.sessions ?? new MemorySessionOwnershipStore(),
   });
   const client = new Client({ name: "unified-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -331,5 +337,198 @@ describe("unified MCP gateway", () => {
     expect(allowed.isError).not.toBe(true);
     expect(rejected.isError).toBe(true);
     expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  describe("conversation tools", () => {
+    const conversationTools: Tool[] = [
+      tool(
+        "create_session",
+        { kb_id: { type: "string" }, title: { type: "string" } },
+        ["kb_id"],
+      ),
+      tool("get_session", { session_id: { type: "string" } }, ["session_id"]),
+      tool("delete_session", { session_id: { type: "string" } }, ["session_id"]),
+      tool(
+        "chat",
+        {
+          session_id: { type: "string" },
+          query: { type: "string" },
+          knowledge_base_ids: { type: "array", items: { type: "string" } },
+        },
+        ["session_id", "query"],
+      ),
+    ];
+    const talker: ClientAccessPolicy = {
+      ...selectedClient,
+      capabilities: ["knowledge.read", "conversation.use"],
+    };
+
+    function upstreamWithSession(sessionId: string) {
+      return vi.fn(async ({ name }): Promise<CallToolResult> => ({
+        content: [
+          {
+            type: "text",
+            text:
+              name === "create_session"
+                ? JSON.stringify({ data: { id: sessionId }, success: true })
+                : "ok",
+          },
+        ],
+      }));
+    }
+
+    it("lets a client use only sessions it created", async () => {
+      const sessions = new MemorySessionOwnershipStore();
+      await sessions.record("foreign-session", "claude-weknora-read");
+      const callTool = upstreamWithSession("own-session");
+      const { client } = await connect({
+        client: talker,
+        tools: conversationTools,
+        upstream: { callTool },
+        sessions,
+      });
+
+      await client.callTool({ name: "create_session", arguments: { kb_id: KB_A } });
+      const own = await client.callTool({
+        name: "get_session",
+        arguments: { session_id: "own-session" },
+      });
+      const foreign = await client.callTool({
+        name: "get_session",
+        arguments: { session_id: "foreign-session" },
+      });
+      const unknown = await client.callTool({
+        name: "chat",
+        arguments: { session_id: "web-ui-session", query: "hi" },
+      });
+
+      expect(await sessions.owner("own-session")).toBe(talker.clientId);
+      expect(own.isError).not.toBe(true);
+      expect(foreign.isError).toBe(true);
+      expect(unknown.isError).toBe(true);
+      expect(JSON.stringify(foreign.content)).toMatch(/not created by this OAuth client/);
+      expect(callTool.mock.calls.map(([call]) => call.name)).toEqual([
+        "create_session",
+        "get_session",
+      ]);
+    });
+
+    it("forgets a session after it is deleted", async () => {
+      const sessions = new MemorySessionOwnershipStore();
+      await sessions.record("own-session", talker.clientId);
+      const { client } = await connect({
+        client: talker,
+        tools: conversationTools,
+        upstream: { callTool: upstreamWithSession("unused") },
+        sessions,
+      });
+
+      const deleted = await client.callTool({
+        name: "delete_session",
+        arguments: { session_id: "own-session" },
+      });
+
+      expect(deleted.isError).not.toBe(true);
+      expect(await sessions.owner("own-session")).toBeUndefined();
+    });
+
+    it("pins chat to the selected knowledge bases when none are given", async () => {
+      const sessions = new MemorySessionOwnershipStore();
+      await sessions.record("own-session", talker.clientId);
+      const callTool = upstreamWithSession("unused");
+      const { client } = await connect({
+        client: talker,
+        tools: conversationTools,
+        upstream: { callTool },
+        sessions,
+      });
+
+      await client.callTool({
+        name: "chat",
+        arguments: { session_id: "own-session", query: "hi" },
+      });
+      const outside = await client.callTool({
+        name: "chat",
+        arguments: { session_id: "own-session", query: "hi", knowledge_base_ids: [KB_C] },
+      });
+
+      expect(callTool).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledWith({
+        name: "chat",
+        arguments: {
+          session_id: "own-session",
+          query: "hi",
+          knowledge_base_ids: [KB_A, KB_B],
+        },
+      });
+      expect(outside.isError).toBe(true);
+    });
+
+    it("does not restrict sessions for a full-access client", async () => {
+      const fullClient: ClientAccessPolicy = {
+        ...selectedClient,
+        accessType: "full",
+        capabilities: [],
+        knowledgeBaseScope: "all",
+        knowledgeBases: [],
+      };
+      const callTool = upstreamWithSession("unused");
+      const { client } = await connect({
+        client: fullClient,
+        tools: conversationTools,
+        upstream: { callTool },
+      });
+
+      const result = await client.callTool({
+        name: "chat",
+        arguments: { session_id: "web-ui-session", query: "hi" },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(callTool).toHaveBeenCalledWith({
+        name: "chat",
+        arguments: { session_id: "web-ui-session", query: "hi" },
+      });
+    });
+  });
+
+  it("preflights update_knowledge_from_text against the allowed knowledge bases", async () => {
+    const writer: ClientAccessPolicy = {
+      ...selectedClient,
+      capabilities: ["knowledge.write"],
+    };
+    const callTool = vi.fn(async ({ name }): Promise<CallToolResult> => ({
+      content: [
+        {
+          type: "text",
+          text:
+            name === "get_knowledge"
+              ? JSON.stringify({ data: { knowledge_base_id: KB_A } })
+              : "updated",
+        },
+      ],
+    }));
+    const { client } = await connect({
+      client: writer,
+      tools: [
+        tool(
+          "update_knowledge_from_text",
+          { knowledge_id: { type: "string" }, content: { type: "string" } },
+          ["knowledge_id", "content"],
+        ),
+      ],
+      upstream: { callTool },
+    });
+
+    const result = await client.callTool({
+      name: "update_knowledge_from_text",
+      arguments: { knowledge_id: "knowledge-1", content: "new" },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(callTool.mock.calls.map(([call]) => call.name)).toEqual([
+      "get_knowledge",
+      "update_knowledge_from_text",
+    ]);
   });
 });

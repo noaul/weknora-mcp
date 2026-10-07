@@ -5,7 +5,9 @@ import { FileMcpAccessPolicyStore } from "./access-policy.js";
 import { buildConsoleApp } from "./console-app.js";
 import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
-import { KeycloakAdminClient, MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
+import { KeycloakAdminClient } from "./keycloak-admin.js";
+import { MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
+import { FileStaticTokenStore } from "./static-tokens.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
 async function readSecret(path: string, name: string): Promise<string> {
@@ -65,9 +67,7 @@ async function main(): Promise<void> {
     policyFile: config.policyFile,
     auditFile: config.auditFile,
     fallbackKnowledgeBase: config.fallbackKnowledgeBase,
-    defaultClients: MANAGED_OAUTH_CLIENTS.map(
-      ({ clientId, label, provider }) => ({ clientId, label, provider }),
-    ),
+    defaultClients: MANAGED_ACCESS_CLIENTS,
   });
   const weknora = new WeKnoraApiClient({
     baseUrl: config.weknoraApiUrl,
@@ -86,6 +86,7 @@ async function main(): Promise<void> {
     sessions,
     accessPolicyStore,
     oauthClientManager,
+    staticTokens: new FileStaticTokenStore({ file: config.staticTokenFile }),
     weknora,
     checkServices: async () => ({
       gateway: await healthStatus(config.gatewayHealthUrl),

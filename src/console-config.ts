@@ -16,6 +16,10 @@ const schema = z.object({
   SESSION_SECRET_FILE: z.string().min(1),
   MCP_ACCESS_POLICY_FILE: z.string().min(1),
   MCP_AUDIT_FILE: z.string().min(1),
+  MCP_STATIC_TOKEN_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/static-tokens.json"),
   FALLBACK_KB_ID: z.string().uuid(),
   FALLBACK_KB_NAME: z.string().min(1),
   WEKNORA_API_URL: z.string().url(),
@@ -43,6 +47,7 @@ export interface ConsoleConfig {
   sessionSecretFile: string;
   policyFile: string;
   auditFile: string;
+  staticTokenFile: string;
   fallbackKnowledgeBase: { id: string; name: string };
   weknoraApiUrl: URL;
   weknoraApiKeyFile: string;
@@ -111,6 +116,7 @@ export function parseConsoleConfig(
     sessionSecretFile: parsed.data.SESSION_SECRET_FILE,
     policyFile: parsed.data.MCP_ACCESS_POLICY_FILE,
     auditFile: parsed.data.MCP_AUDIT_FILE,
+    staticTokenFile: parsed.data.MCP_STATIC_TOKEN_FILE,
     fallbackKnowledgeBase: {
       id: parsed.data.FALLBACK_KB_ID,
       name: parsed.data.FALLBACK_KB_NAME,

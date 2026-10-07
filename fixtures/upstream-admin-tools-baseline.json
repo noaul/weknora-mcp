@@ -1,7 +1,8 @@
 {
   "server": {
     "name": "weknora-server",
-    "version": "1.1.1"
+    "version": "1.1.1",
+    "source": "Tencent/WeKnora v0.8.2 mcp-server"
   },
   "tools": [
     {
@@ -169,7 +170,6 @@
     {
       "name": "create_knowledge_from_file",
       "inputSchema": {
-        "type": "object",
         "properties": {
           "kb_id": {
             "title": "Kb Id",
@@ -183,14 +183,45 @@
             "default": true,
             "title": "Enable Multimodel",
             "type": "boolean"
+          },
+          "file_name": {
+            "default": "",
+            "title": "File Name",
+            "type": "string"
           }
         },
         "required": [
           "kb_id",
           "file_path"
         ],
-        "title": "create_knowledge_from_fileArguments"
-      }
+        "title": "create_knowledge_from_fileArguments",
+        "type": "object"
+      },
+      "legacyInputSchemas": [
+        {
+          "type": "object",
+          "properties": {
+            "kb_id": {
+              "title": "Kb Id",
+              "type": "string"
+            },
+            "file_path": {
+              "title": "File Path",
+              "type": "string"
+            },
+            "enable_multimodel": {
+              "default": true,
+              "title": "Enable Multimodel",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kb_id",
+            "file_path"
+          ],
+          "title": "create_knowledge_from_fileArguments"
+        }
+      ]
     },
     {
       "name": "create_knowledge_from_url",
@@ -265,9 +296,40 @@
       }
     },
     {
+      "name": "update_knowledge_from_text",
+      "inputSchema": {
+        "properties": {
+          "knowledge_id": {
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "status": {
+            "default": "publish",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id",
+          "content"
+        ],
+        "title": "update_knowledge_from_textArguments",
+        "type": "object"
+      },
+      "optional": true
+    },
+    {
       "name": "list_knowledge",
       "inputSchema": {
-        "type": "object",
         "properties": {
           "kb_id": {
             "title": "Kb Id",
@@ -282,13 +344,56 @@
             "default": 20,
             "title": "Page Size",
             "type": "integer"
+          },
+          "folder_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Folder Path"
+          },
+          "folder_scope": {
+            "default": "",
+            "title": "Folder Scope",
+            "type": "string"
           }
         },
         "required": [
           "kb_id"
         ],
-        "title": "list_knowledgeArguments"
-      }
+        "title": "list_knowledgeArguments",
+        "type": "object"
+      },
+      "legacyInputSchemas": [
+        {
+          "type": "object",
+          "properties": {
+            "kb_id": {
+              "title": "Kb Id",
+              "type": "string"
+            },
+            "page": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "page_size": {
+              "default": 20,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kb_id"
+          ],
+          "title": "list_knowledgeArguments"
+        }
+      ]
     },
     {
       "name": "get_knowledge",

@@ -1,13 +1,19 @@
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { buildConsoleApp } from "../src/console-app.js";
 import { ConsoleSessionStore } from "../src/console-auth.js";
+import { FileStaticTokenStore } from "../src/static-tokens.js";
 
 const KB_A = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const KB_B = "14f18c87-26b4-4b51-ac9f-cb57ace46df7";
 const CHATGPT_CLIENT_ID = "chatgpt-weknora-read";
+const XIAOMI_CLIENT_ID = "xiaomi-weknora-token";
 
-function createFixture() {
+function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.json`)) {
   const sessions = new ConsoleSessionStore({
     ttlMs: 60_000,
     secret: Buffer.alloc(32, 9),
@@ -29,6 +35,16 @@ function createFixture() {
         clientId: "claude-weknora-read",
         label: "Claude WeKnora",
         provider: "Claude" as const,
+        accessType: "capabilities" as const,
+        capabilities: ["knowledge.read" as const],
+        knowledgeBaseScope: "selected" as const,
+        defaultKbId: KB_A,
+        knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
+      },
+      {
+        clientId: XIAOMI_CLIENT_ID,
+        label: "小米手机 WeKnora",
+        provider: "Xiaomi" as const,
         accessType: "capabilities" as const,
         capabilities: ["knowledge.read" as const],
         knowledgeBaseScope: "selected" as const,
@@ -96,6 +112,7 @@ function createFixture() {
     })),
     revokeManagedClientSessions: vi.fn(async () => ({ revokedSessions: 1 })),
   };
+  const staticTokens = new FileStaticTokenStore({ file: staticTokenFile });
   const app = buildConsoleApp({
     publicUrl: new URL("https://wek.uov.me/mcp-console/"),
     oidc: {
@@ -123,6 +140,7 @@ function createFixture() {
       ],
     },
     oauthClientManager,
+    staticTokens,
     weknora: {
       listKnowledgeBases: async () => [
         {
@@ -147,7 +165,7 @@ function createFixture() {
     indexHtml: "<!doctype html><title>MCP Console</title>",
     logLevel: "silent",
   });
-  return { app, writeClient, appendAudit, oauthClientManager };
+  return { app, writeClient, appendAudit, oauthClientManager, staticTokens };
 }
 
 async function login(app: ReturnType<typeof buildConsoleApp>) {
@@ -241,6 +259,14 @@ describe("MCP console HTTP app", () => {
             knowledgeBaseScope: "selected",
             defaultKbId: KB_A,
           },
+        },
+        {
+          kind: "token",
+          key: "xiaomi-token",
+          clientId: XIAOMI_CLIENT_ID,
+          hasToken: false,
+          enabled: false,
+          access: { capabilities: ["knowledge.read"] },
         },
       ],
     });
@@ -396,6 +422,75 @@ describe("MCP console HTTP app", () => {
     expect(revoked.json()).toEqual({ revokedSessions: 1 });
     expect(oauthClientManager.updateManagedClient).toHaveBeenCalledOnce();
     expect(appendAudit).toHaveBeenCalledTimes(3);
+    await app.close();
+  });
+
+  it("issues, disables, and revokes a static token for a token client", async () => {
+    const { app, appendAudit, oauthClientManager, staticTokens } = createFixture();
+    const cookie = await login(app);
+    const token = await csrf(app, cookie);
+    const headers = { cookie, "x-csrf-token": token };
+
+    const disableBeforeIssue = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/xiaomi-token",
+      headers,
+      payload: { enabled: false },
+    });
+    expect(disableBeforeIssue.statusCode).toBe(409);
+
+    const issued = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/oauth-clients/xiaomi-token/rotate-secret",
+      headers,
+    });
+    expect(issued.statusCode).toBe(200);
+    const secret = issued.json().secret as string;
+    expect(secret).toMatch(/^wkmcp_[A-Za-z0-9_-]{43}$/);
+    expect(await staticTokens.verify(secret)).toBe(XIAOMI_CLIENT_ID);
+    expect(oauthClientManager.rotateManagedClientSecret).not.toHaveBeenCalled();
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/oauth-clients",
+      headers: { cookie },
+    });
+    expect(JSON.stringify(listed.json())).not.toContain(secret);
+    expect(listed.json().clients.at(-1)).toMatchObject({ hasToken: true, enabled: true });
+
+    const redirectRejected = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/xiaomi-token",
+      headers,
+      payload: { redirectUri: "https://example.com/callback" },
+    });
+    expect(redirectRejected.statusCode).toBe(400);
+
+    const disabled = await app.inject({
+      method: "PUT",
+      url: "/mcp-console/api/oauth-clients/xiaomi-token",
+      headers,
+      payload: { enabled: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(await staticTokens.verify(secret)).toBeUndefined();
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: "/mcp-console/api/oauth-clients/xiaomi-token/revoke-sessions",
+      headers,
+    });
+    expect(revoked.json()).toEqual({ revokedSessions: 1 });
+    expect(await staticTokens.status(XIAOMI_CLIENT_ID)).toEqual({
+      hasToken: false,
+      enabled: false,
+    });
+    expect(appendAudit.mock.calls.map((call) => (call as unknown[])[0])).toEqual([
+      "static_token.rotated",
+      "static_token.updated",
+      "static_token.revoked",
+    ]);
+    expect(JSON.stringify(appendAudit.mock.calls)).not.toContain(secret);
     await app.close();
   });
 });

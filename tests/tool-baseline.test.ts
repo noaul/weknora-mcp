@@ -1,6 +1,14 @@
+import { readFile } from "node:fs/promises";
+
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 
-import { compareToolBaseline } from "../src/tool-baseline.js";
+import {
+  compareToolBaseline,
+  selectBaselineTools,
+  type ToolBaseline,
+} from "../src/tool-baseline.js";
+import { assertReviewedToolCatalog } from "../src/tool-capabilities.js";
 
 const baseline = {
   tools: [
@@ -78,5 +86,87 @@ describe("tool baseline comparison", () => {
         { rejectUnexpected: true },
       ),
     ).toEqual(["Unexpected upstream tool: future_admin_tool"]);
+  });
+});
+
+describe("tool baseline selection", () => {
+  const legacySchema = {
+    type: "object",
+    properties: { kb_id: { type: "string" } },
+    required: ["kb_id"],
+  };
+  const currentSchema = {
+    type: "object",
+    properties: {
+      kb_id: { type: "string" },
+      folder_path: { anyOf: [{ type: "string" }, { type: "null" }], default: null },
+    },
+    required: ["kb_id"],
+  };
+  const versioned = {
+    tools: [
+      {
+        name: "list_knowledge",
+        inputSchema: currentSchema,
+        legacyInputSchemas: [legacySchema],
+      },
+      {
+        name: "update_knowledge_from_text",
+        inputSchema: { type: "object", properties: {} },
+        optional: true,
+      },
+      baseline.tools[0]!,
+    ],
+  };
+
+  it("accepts current and legacy upstream schemas and optional new tools", () => {
+    for (const inputSchema of [currentSchema, legacySchema]) {
+      const selection = selectBaselineTools(versioned, [
+        { name: "list_knowledge", inputSchema: inputSchema as Tool["inputSchema"] },
+        {
+          name: "hybrid_search",
+          inputSchema: baseline.tools[0]!.inputSchema as Tool["inputSchema"],
+        },
+      ]);
+      expect(selection.errors).toEqual([]);
+      expect(selection.tools.map(({ name }) => name)).toEqual([
+        "list_knowledge",
+        "hybrid_search",
+      ]);
+    }
+  });
+
+  it("drops only changed or unreviewed tools instead of failing the gateway", () => {
+    const selection = selectBaselineTools(versioned, [
+      {
+        name: "list_knowledge",
+        inputSchema: { type: "object", properties: { other: { type: "string" } } },
+      },
+      {
+        name: "hybrid_search",
+        inputSchema: baseline.tools[0]!.inputSchema as Tool["inputSchema"],
+      },
+      { name: "future_admin_tool", inputSchema: { type: "object", properties: {} } },
+    ]);
+
+    expect(selection.tools.map(({ name }) => name)).toEqual(["hybrid_search"]);
+    expect(selection.errors).toEqual([
+      "Input schema changed for upstream tool: list_knowledge",
+      "Unexpected upstream tool: future_admin_tool",
+    ]);
+  });
+
+  it("matches the committed baseline fixture against itself", async () => {
+    const fixture = JSON.parse(
+      await readFile("fixtures/upstream-admin-tools-baseline.json", "utf8"),
+    ) as ToolBaseline;
+    const live = fixture.tools.map(({ name, inputSchema }) => ({
+      name,
+      inputSchema: inputSchema as Tool["inputSchema"],
+    }));
+    const selection = selectBaselineTools(fixture, live);
+
+    expect(selection.errors).toEqual([]);
+    expect(() => assertReviewedToolCatalog(selection.tools)).not.toThrow();
   });
 });

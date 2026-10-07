@@ -28,7 +28,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">按能力授权 / 全权限</p>
-            <h1 id="oauth-title">OAuth 客户端</h1>
+            <h1 id="oauth-title">MCP 客户端</h1>
           </div>
           <button id="refresh-oauth-clients" class="button button-quiet" type="button">刷新</button>
         </div>
@@ -80,10 +80,10 @@
 
     <dialog id="oauth-secret-dialog" class="confirm-dialog secret-dialog">
       <form method="dialog">
-        <h2>新 Client Secret</h2>
+        <h2 id="oauth-secret-title">新 Client Secret</h2>
         <p>关闭后页面不会再次显示该密钥。</p>
         <label class="secret-field">
-          <span>Client Secret</span>
+          <span id="oauth-secret-label">Client Secret</span>
           <input id="oauth-secret-value" type="text" readonly spellcheck="false" />
         </label>
         <div class="dialog-actions">

@@ -8,8 +8,9 @@ import {
   AuthorizationError,
   type AuthenticatedPrincipal,
 } from "../src/auth.js";
-import { buildApp } from "../src/app.js";
+import { bearerToken, buildApp } from "../src/app.js";
 import type { GatewayConfig } from "../src/config.js";
+import { MemorySessionOwnershipStore } from "../src/session-ownership.js";
 
 const KB_ID = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const CLIENT_ID = "chatgpt-weknora-read";
@@ -28,6 +29,8 @@ const config: GatewayConfig = {
   fallbackKbName: "镍基合金",
   accessPolicyFile: "/var/lib/weknora-mcp-console/access-policy.json",
   auditFile: "/var/lib/weknora-mcp-console/audit.ndjson",
+  staticTokenFile: "/var/lib/weknora-mcp-console/static-tokens.json",
+  sessionOwnershipFile: "/var/lib/weknora-mcp-access-gateway/session-owners.json",
   importRoot: "C:\\weknora-import",
   allowedOrigins: ["https://chatgpt.com", "https://claude.ai"],
   rateLimitIpPerMinute: 120,
@@ -103,6 +106,7 @@ function options(overrides: Partial<Parameters<typeof buildApp>[0]> = {}) {
     upstream: {} as never,
     tools,
     accessPolicy,
+    sessions: new MemorySessionOwnershipStore(),
     ...overrides,
   };
 }
@@ -293,4 +297,23 @@ describe("HTTP application", () => {
       await app.close();
     }
   });
+});
+
+describe("bearer token parsing", () => {
+  it.each([
+    ["Bearer abc.def", "abc.def"],
+    ["bearer abc.def", "abc.def"],
+    ["Bearer Bearer wkmcp_token", "wkmcp_token"],
+    ["wkmcp_token", "wkmcp_token"],
+    ["  Bearer   wkmcp_token  ", "wkmcp_token"],
+  ])("accepts %j", (header, expected) => {
+    expect(bearerToken(header)).toBe(expected);
+  });
+
+  it.each([undefined, "", "Bearer", "Bearer ", "Basic a b", "Bearer a b"])(
+    "rejects %j",
+    (header) => {
+      expect(bearerToken(header)).toBeUndefined();
+    },
+  );
 });

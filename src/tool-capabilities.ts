@@ -52,6 +52,11 @@ const TOOL_ACCESS_RULES = {
     capabilities: ["knowledge.write"],
     kbArgument: "kb_id",
   },
+  update_knowledge_from_text: {
+    kind: "capability",
+    capabilities: ["knowledge.write"],
+    resourceScope: "knowledge",
+  },
   list_knowledge: {
     kind: "capability",
     capabilities: ["knowledge.read"],
