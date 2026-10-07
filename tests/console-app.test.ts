@@ -41,16 +41,22 @@ function createFixture(staticTokenFile = join(tmpdir(), `static-${randomUUID()}.
         defaultKbId: KB_A,
         knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
       },
-      {
-        clientId: XIAOMI_CLIENT_ID,
-        label: "小米手机 WeKnora",
-        provider: "Xiaomi" as const,
+      ...(
+        [
+          [XIAOMI_CLIENT_ID, "小米手机 WeKnora", "Xiaomi"],
+          ["lobehub-weknora-token", "LobeHub WeKnora", "LobeHub"],
+          ["codeg-weknora-token", "Codeg WeKnora", "Codeg"],
+        ] as const
+      ).map(([clientId, label, provider]) => ({
+        clientId,
+        label,
+        provider,
         accessType: "capabilities" as const,
         capabilities: ["knowledge.read" as const],
         knowledgeBaseScope: "selected" as const,
         defaultKbId: KB_A,
         knowledgeBases: [{ id: KB_A, name: "镍基合金" }],
-      },
+      })),
     ],
   };
   const writeClient = vi.fn(async (clientId, update, actor) => {
@@ -268,6 +274,8 @@ describe("MCP console HTTP app", () => {
           enabled: false,
           access: { capabilities: ["knowledge.read"] },
         },
+        { kind: "token", key: "lobehub-token", clientId: "lobehub-weknora-token" },
+        { kind: "token", key: "codeg-token", clientId: "codeg-weknora-token" },
       ],
     });
     expect(JSON.stringify(response.json())).not.toContain("new-one-time-secret");
@@ -456,7 +464,9 @@ describe("MCP console HTTP app", () => {
       headers: { cookie },
     });
     expect(JSON.stringify(listed.json())).not.toContain(secret);
-    expect(listed.json().clients.at(-1)).toMatchObject({ hasToken: true, enabled: true });
+    expect(
+      listed.json().clients.find(({ key }: { key: string }) => key === "xiaomi-token"),
+    ).toMatchObject({ hasToken: true, enabled: true });
 
     const redirectRejected = await app.inject({
       method: "PUT",

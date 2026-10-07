@@ -9,6 +9,15 @@ const CAPABILITY_LABELS = {
 
 const UNSUPPORTED_CAPABILITIES = ["API Key 管理", "租户成员管理"];
 
+const TOKEN_SETUP_HINTS = {
+  Xiaomi:
+    "在手机的「MCP 服务」中添加：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
+  LobeHub:
+    "在 LobeHub 的连接器中使用 Streamable HTTP：URL 填上方地址，请求头 Authorization 填 “Bearer <Token>”。",
+  Codeg:
+    "在 Codeg「设置 → MCP → 新建 MCP」中填 JSON：{\"type\": \"http\", \"url\": 上方地址, \"headers\": {\"Authorization\": \"Bearer <Token>\"}}。",
+};
+
 const state = {
   session: null,
   overview: null,
@@ -127,7 +136,10 @@ function button(label, variant = "secondary", onClick) {
 }
 
 function clientInitial(client) {
-  return { ChatGPT: "G", Claude: "C", Xiaomi: "米" }[client.provider] || client.label.slice(0, 1);
+  return (
+    { ChatGPT: "G", Claude: "C", Xiaomi: "米", LobeHub: "L", Codeg: "D" }[client.provider] ||
+    client.label.slice(0, 1)
+  );
 }
 
 function clientAvatar(client, large = false) {
@@ -565,7 +577,8 @@ function renderTokenConnection(parent, client) {
     parent,
     "div",
     "callout",
-    "在手机的「MCP 服务」中添加：名称任意，服务器 URL 填上方地址，Auth Token 填生成的 Token（带不带 “Bearer ” 前缀均可）。",
+    TOKEN_SETUP_HINTS[client.provider] ||
+      "在客户端中添加远程 MCP：服务器 URL 填上方地址，请求头 Authorization 填 “Bearer <Token>”。",
   );
 }
 

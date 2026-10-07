@@ -14,7 +14,7 @@ import { AuthenticationError, type AuthenticatedPrincipal } from "./auth.js";
 export interface ManagedTokenClientDefinition {
   key: string;
   label: string;
-  provider: "Xiaomi";
+  provider: "Xiaomi" | "LobeHub" | "Codeg";
   clientId: string;
   mcpUrl: string;
 }
@@ -25,6 +25,20 @@ export const MANAGED_TOKEN_CLIENTS: ManagedTokenClientDefinition[] = [
     label: "小米手机 WeKnora",
     provider: "Xiaomi",
     clientId: "xiaomi-weknora-token",
+    mcpUrl: "https://wek.uov.me/mcp",
+  },
+  {
+    key: "lobehub-token",
+    label: "LobeHub WeKnora",
+    provider: "LobeHub",
+    clientId: "lobehub-weknora-token",
+    mcpUrl: "https://wek.uov.me/mcp",
+  },
+  {
+    key: "codeg-token",
+    label: "Codeg WeKnora",
+    provider: "Codeg",
+    clientId: "codeg-weknora-token",
     mcpUrl: "https://wek.uov.me/mcp",
   },
 ];

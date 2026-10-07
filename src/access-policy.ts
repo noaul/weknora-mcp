@@ -26,7 +26,7 @@ const knowledgeBaseChoiceSchema = z.strictObject({
 const managedClientSchema = z.strictObject({
   clientId: z.string().trim().min(1).max(200),
   label: z.string().trim().min(1).max(200),
-  provider: z.enum(["ChatGPT", "Claude", "Xiaomi"]),
+  provider: z.enum(["ChatGPT", "Claude", "Xiaomi", "LobeHub", "Codeg"]),
 });
 
 const clientAccessPolicySchema = managedClientSchema

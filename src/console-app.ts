@@ -130,7 +130,11 @@ export interface BuildConsoleAppOptions {
 }
 
 const oauthClientParamsSchema = z.object({
-  key: z.enum(["chatgpt-read", "claude-read", "xiaomi-token"]),
+  key: z
+    .string()
+    .refine(
+      (key) => [...MANAGED_OAUTH_CLIENTS, ...MANAGED_TOKEN_CLIENTS].some((client) => client.key === key),
+    ),
 });
 
 const clientIdByKey = new Map(
