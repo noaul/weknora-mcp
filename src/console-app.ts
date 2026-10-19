@@ -24,6 +24,7 @@ import {
   KeycloakAdminError,
   MCP_OAUTH_SCOPE,
   OAUTH_PROVIDERS,
+  validateRedirectUri,
   type KeycloakAdminClient,
   type OAuthClientState,
   type OAuthProvider,
@@ -154,7 +155,7 @@ export interface BuildConsoleAppOptions {
   logLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
 }
 
-type IntegrationId = "chatgpt" | "claude" | "apikey";
+type IntegrationId = "chatgpt" | "claude" | "gemini" | "apikey";
 
 const INTEGRATIONS: Array<{
   id: IntegrationId;
@@ -163,11 +164,12 @@ const INTEGRATIONS: Array<{
 }> = [
   { id: "chatgpt", label: "ChatGPT", provider: "ChatGPT" },
   { id: "claude", label: "Claude", provider: "Claude" },
+  { id: "gemini", label: "Gemini", provider: "Gemini" },
   { id: "apikey", label: "API Key", provider: "Token" },
 ];
 
 const integrationParamsSchema = z.object({
-  integration: z.enum(["chatgpt", "claude", "apikey"]),
+  integration: z.enum(["chatgpt", "claude", "gemini", "apikey"]),
 });
 const credentialParamsSchema = z.object({
   clientId: z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/),
@@ -506,6 +508,17 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     }
 
     const provider = integration.provider;
+    let redirectUri: string;
+    try {
+      redirectUri = validateRedirectUri(
+        body.data.redirectUri ?? OAUTH_PROVIDERS[provider].defaultRedirectUri,
+      );
+    } catch (error) {
+      if (error instanceof KeycloakAdminError) {
+        return reply.code(400).send({ error: "invalid_credential_request" });
+      }
+      throw error;
+    }
     const existing = (await options.accessPolicyStore.read()).clients;
     const clientId = `${OAUTH_PROVIDERS[provider].clientIdPrefix}-${randomBytes(3).toString("hex")}`;
     let created: Awaited<ReturnType<typeof options.oauthClientManager.createClient>>;
@@ -513,7 +526,7 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       created = await options.oauthClientManager.createClient({
         clientId,
         label: body.data.label,
-        redirectUri: body.data.redirectUri ?? OAUTH_PROVIDERS[provider].defaultRedirectUri,
+        redirectUri,
         templateClientIds: existing
           .filter((client) => client.provider in OAUTH_PROVIDERS)
           .map((client) => client.clientId),

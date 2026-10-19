@@ -258,10 +258,51 @@ describe("MCP console HTTP app", () => {
           ],
         },
         { id: "claude", kind: "oauth", credentials: [{ clientId: "claude-weknora-read" }] },
+        { id: "gemini", label: "Gemini", kind: "oauth", defaultRedirectUri: "", credentials: [] },
         { id: "apikey", kind: "token", credentials: [] },
       ],
     });
     expect(JSON.stringify(body)).not.toContain("secret\":");
+    await app.close();
+  });
+
+  it("requires an explicit callback for Gemini and stores its independent OAuth credential", async () => {
+    const { app, policyStore } = await createFixture();
+    const cookie = await login(app);
+    const headers = { cookie, "x-csrf-token": await csrf(app, cookie) };
+    const url = "/mcp-console/api/integrations/gemini/credentials";
+
+    for (const redirectUri of [undefined, "", "http://example.com/callback", "https://example.com/*"]) {
+      const rejected = await app.inject({
+        method: "POST", url, headers, payload: { label: "Gemini 网页版", redirectUri },
+      });
+      expect(rejected.statusCode).toBe(400);
+    }
+
+    // A supplied exact HTTPS callback is accepted without assuming Google's callback path.
+    const redirectUri = "https://example.com/gemini-callback";
+    const created = await app.inject({
+      method: "POST", url, headers, payload: { label: "Gemini 网页版", redirectUri },
+    });
+    expect(created.statusCode).toBe(200);
+    const { clientId } = created.json();
+    expect(clientId).toMatch(/^gemini-weknora-[0-9a-f]{6}$/);
+    expect(created.json()).toMatchObject({ kind: "oauth", secret: "created-client-secret" });
+    expect((await policyStore.read()).clients.find((entry) => entry.clientId === clientId)).toMatchObject({
+      provider: "Gemini", label: "Gemini 网页版", capabilities: ["knowledge.read"],
+      knowledgeBaseScope: "selected", defaultKbId: KB_A,
+    });
+
+    const listed = await app.inject({ method: "GET", url: "/mcp-console/api/integrations", headers: { cookie } });
+    expect(listed.json().integrations.find((entry: { id: string }) => entry.id === "gemini").credentials)
+      .toMatchObject([{ clientId, enabled: true, exists: true, redirectUri }]);
+    expect(listed.body).not.toContain("created-client-secret");
+
+    const rotated = await app.inject({ method: "POST", url: `/mcp-console/api/credentials/${clientId}/rotate-secret`, headers });
+    expect(rotated.statusCode).toBe(200);
+    const deleted = await app.inject({ method: "DELETE", url: `/mcp-console/api/credentials/${clientId}`, headers });
+    expect(deleted.statusCode).toBe(200);
+    expect((await policyStore.read()).clients.some((entry) => entry.clientId === clientId)).toBe(false);
     await app.close();
   });
 
@@ -411,7 +452,8 @@ describe("MCP console HTTP app", () => {
       headers: { cookie },
     });
     expect(JSON.stringify(listed.json())).not.toContain(codeg.secret);
-    expect(listed.json().integrations[2].credentials).toHaveLength(2);
+    expect(listed.json().integrations.find((entry: { id: string }) => entry.id === "apikey").credentials)
+      .toHaveLength(2);
 
     const path = `/mcp-console/api/credentials/${codeg.clientId}`;
     await app.inject({ method: "PUT", url: path, headers, payload: { enabled: false } });

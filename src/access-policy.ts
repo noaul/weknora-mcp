@@ -28,7 +28,7 @@ const managedClientSchema = z.strictObject({
   clientId: z.string().trim().min(1).max(200),
   label: z.string().trim().min(1).max(200),
   // Xiaomi, LobeHub and Codeg are legacy per-app token clients kept parseable.
-  provider: z.enum(["ChatGPT", "Claude", "Token", "Xiaomi", "LobeHub", "Codeg"]),
+  provider: z.enum(["ChatGPT", "Claude", "Gemini", "Token", "Xiaomi", "LobeHub", "Codeg"]),
 });
 
 const clientAccessPolicySchema = managedClientSchema

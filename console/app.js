@@ -418,7 +418,7 @@ function selectTab(tab) {
 }
 
 function integrationAvatar(integration, large = false) {
-  const initial = { chatgpt: "G", claude: "C", apikey: "K" }[integration.id] || "?";
+  const initial = { chatgpt: "G", claude: "C", gemini: "✦", apikey: "K" }[integration.id] || "?";
   return el("span", `client-avatar avatar-${integration.id}${large ? " large" : ""}`, initial);
 }
 
@@ -615,7 +615,9 @@ function renderConnectionTab(parent, integration) {
         valueRow("Issuer", state.data.oauth.issuer, true),
         valueRow("Authorization URL", state.data.oauth.authorizationEndpoint, true),
         valueRow("Token URL", state.data.oauth.tokenEndpoint, true),
-        valueRow("默认回调 URL", integration.defaultRedirectUri, true),
+        integration.defaultRedirectUri
+          ? valueRow("默认回调 URL", integration.defaultRedirectUri, true)
+          : row("回调 URL", "新增凭据时填写客户端实际使用的精确 HTTPS 回调地址"),
       );
     } else {
       const configRow = el("div", "row row-block");
@@ -629,7 +631,15 @@ function renderConnectionTab(parent, integration) {
   const guide = el("section", "card subtle");
   appendText(guide, "h3", "card-subtitle", "接入步骤");
   const steps = el("ol", "steps");
-  const items = oauth
+  const items = integration.id === "gemini"
+    ? [
+        "在 Gemini 网页版的 Connected Apps 中添加自定义应用，打开“Connect to an MCP server”",
+        "将上方 MCP 地址填入 MCP Server URL（必须以 https:// 开头）",
+        "确认 Gemini 实际使用的 OAuth 回调 URL，在“新增凭据”中填写该精确地址并创建凭据",
+        "展开 Additional settings，将凭据的 Client ID 和 Client Secret 分别填入 Client ID、Client secret",
+        "点击 Next，完成登录与授权；可在凭据页配置权限和知识库范围",
+      ]
+    : oauth
     ? [
         `在“新增凭据”中为每个 ${integration.label} 账号或用途创建一个凭据，并复制 Client Secret`,
         `在 ${integration.label} 中添加自定义连接器，填写 MCP 地址、Client ID 与 Client Secret`,
@@ -1022,12 +1032,15 @@ function renderNewTab(parent, integration) {
     redirect.required = true;
     redirect.spellcheck = false;
     redirect.value = integration.defaultRedirectUri;
+    if (!integration.defaultRedirectUri) redirect.placeholder = "填写客户端实际使用的精确 HTTPS 回调地址";
     redirectField.append(redirect);
     appendText(
       redirectField,
       "span",
       "field-hint",
-      `${integration.label} 的默认回调地址，创建后也可修改`,
+      integration.defaultRedirectUri
+        ? `${integration.label} 的默认回调地址，创建后也可修改`
+        : `填写 ${integration.label} 实际使用的 OAuth 回调地址（HTTPS，不支持通配符）`,
     );
     form.append(redirectField);
   }

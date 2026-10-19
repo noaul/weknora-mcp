@@ -6,6 +6,7 @@
 | --- | --- | --- | --- |
 | ChatGPT | `chatgpt-weknora-read` | `https://wek.uov.me/mcp` | `weknora:mcp` |
 | Claude | `claude-weknora-read` | `https://wek.uov.me/mcp` | `weknora:mcp` |
+| Gemini web | Create `gemini-weknora-xxxxxx` in the console | `https://wek.uov.me/mcp` | `weknora:mcp` |
 
 The `*-read` suffix is retained for compatibility with the existing installed
 clients. It does not determine access. Open the management console and choose
@@ -62,15 +63,34 @@ callbacks and secrets are preserved during the unified-client migration.
 4. Complete the Keycloak login and consent flow.
 5. Reconnect or refresh tools after changing permissions.
 
+## Gemini web
+
+1. In Gemini's Connected Apps, add a custom app and open **Connect to an MCP server**.
+2. Set **MCP Server URL** to `https://wek.uov.me/mcp` (or your deployment's HTTPS `/mcp` URL).
+3. Confirm the exact OAuth callback URI used by Gemini. In the management console,
+   open **Gemini → 新增凭据**, enter a name and that callback URL, and create the credential.
+   No Google callback URL is preset: use the URI from Gemini's setup information
+   or the `redirect_uri` parameter of its OAuth authorization request. It must be
+   an exact HTTPS URL without wildcards.
+4. Expand **Additional settings** in Gemini. Copy the new credential's **Client ID**
+   into **Client ID** and its one-time **Client Secret** into **Client secret**.
+5. Click **Next** and complete the Keycloak login and consent flow.
+6. Manage capabilities and knowledge-base access in that credential's console tab.
+   Reconnect or refresh tools in Gemini after changing permissions.
+
+Gemini credentials are created on demand, so existing deployments do not need a
+seeded Gemini Keycloak client or a policy migration. Each credential defaults to
+read-only access on the default knowledge base.
+
 ## Credentials and permissions
 
-The console groups access by integration: ChatGPT, Claude, and API Key. Each
+The console groups access by integration: ChatGPT, Claude, Gemini, and API Key. Each
 integration page has a `连接信息` tab (shared MCP URL and authentication
 details), one tab per credential, and a `新增` tab. Every credential has its own
 capabilities and knowledge-base scope.
 
-- ChatGPT / Claude: each credential is a separate Keycloak OAuth client
-  (`chatgpt-weknora-xxxxxx`, `claude-weknora-xxxxxx`) with its own Client ID,
+- ChatGPT / Claude / Gemini: each credential is a separate Keycloak OAuth client
+  (`chatgpt-weknora-xxxxxx`, `claude-weknora-xxxxxx`, `gemini-weknora-xxxxxx`) with its own Client ID,
   Client Secret, callback URL, and sessions. The Client Secret is shown once
   after creation or rotation.
 - API Key: each key (`apikey-<id>`) is for one app such as the Xiaomi phone,
@@ -106,5 +126,5 @@ configuration in WeKnora, so grant `agents.read` only where that is acceptable.
 under `/var/lib/weknora-mcp-import`; paths outside that directory are rejected.
 For content already available to the client, prefer text or URL ingestion.
 
-The Tenant API Key remains inside the server. Neither ChatGPT nor Claude needs
-or receives it.
+The Tenant API Key remains inside the server. ChatGPT, Claude, and Gemini do not
+need or receive it.

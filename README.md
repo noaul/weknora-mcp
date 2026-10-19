@@ -2,7 +2,7 @@
 
 为腾讯官方 WeKnora MCP 提供 OAuth 认证、按客户端权限控制和知识库范围管理的独立网关。
 
-ChatGPT 与 Claude 通过同一个远程 `/mcp` 入口连接，服务器根据 OAuth Client 分别决定可见工具、可访问知识库以及是否授予全权限。
+ChatGPT、Claude 与 Gemini 网页版通过同一个远程 `/mcp` 入口连接，服务器根据 OAuth Client 分别决定可见工具、可访问知识库以及是否授予全权限。
 
 > 本项目是独立 sidecar，不修改 WeKnora 官方前端、后端或镜像，也不是腾讯官方项目。底层 MCP 工具来自 [Tencent/WeKnora](https://github.com/Tencent/WeKnora) 发布的 `tencent-weknora-mcp`。
 
@@ -11,7 +11,7 @@ ChatGPT 与 Claude 通过同一个远程 `/mcp` 入口连接，服务器根据 O
 官方 `tencent-weknora-mcp` 负责把 WeKnora REST API 转换为 MCP 工具。本项目部署在它前面，补充适合网页端 AI 客户端长期使用的认证和授权能力：
 
 ```text
-ChatGPT / Claude
+ChatGPT / Claude / Gemini
         |
         | OAuth access token
         v
@@ -32,14 +32,14 @@ WeKnora REST API
 
 - 一个统一的远程 MCP 入口，例如 `https://mcp.example.com/mcp`
 - 使用 Keycloak 提供 OAuth 2.0 / OIDC 登录
-- 为 ChatGPT、Claude 等 OAuth Client 独立配置权限
+- 为 ChatGPT、Claude、Gemini 等 OAuth Client 独立配置权限
 - 支持“按能力”和“全权限”两种授权模式
 - 支持全部知识库或指定知识库 allow-list
 - 为指定范围配置默认知识库
 - 调用工具时再次检查能力和知识库范围
 - 未经审核的新增上游工具或 schema 发生变化的工具会被单独隐藏，其余工具继续可用
 - 按能力模式下会话按创建者隔离，客户端只能使用自己创建的会话
-- ChatGPT / Claude 可创建多个 OAuth 凭据，API Key 可创建多个具名 Key；每个凭据单独管理权限、知识库范围、启停、轮换与删除
+- ChatGPT / Claude / Gemini 可创建多个 OAuth 凭据，API Key 可创建多个具名 Key；每个凭据单独管理权限、知识库范围、启停、轮换与删除
 - 限制服务器本地文件导入目录
 - 提供独立 MCP 管理控制台
 - 记录不包含密钥和 token 的追加式审计日志
@@ -98,13 +98,16 @@ https://mcp.example.com/mcp-console/
 | --- | --- | --- | --- |
 | ChatGPT | `chatgpt-weknora-read` | `https://mcp.example.com/mcp` | `weknora:mcp` |
 | Claude | `claude-weknora-read` | `https://mcp.example.com/mcp` | `weknora:mcp` |
+| Gemini 网页版 | 在控制台新增 `gemini-weknora-xxxxxx` | `https://mcp.example.com/mcp` | `weknora:mcp` |
 | 小米手机、LobeHub、Codeg 等 | 每个 Key 一个 `apikey-<id>` | `https://mcp.example.com/mcp` | API Key，无 OAuth |
 
-ChatGPT、Claude 可在控制台新增多个 OAuth 凭据；不能走 OAuth 的客户端使用「API Key」中新建的具名 Key（`wkmcp_…`）。每个凭据单独配置权限与知识库范围。
+ChatGPT、Claude、Gemini 可在控制台并列的入口中新增多个 OAuth 凭据；不能走 OAuth 的客户端使用「API Key」中新建的具名 Key（`wkmcp_…`）。每个凭据单独配置权限与知识库范围。
+
+Gemini 网页版在自定义 Connected Apps 的连接窗口中填写 MCP Server URL，并在 Additional settings 中填写 Client ID 和 Client secret。新增 Gemini 凭据时需填写其实际使用的精确 HTTPS 回调地址，控制台不预设未经核实的 Google 回调 URL。
 
 `*-read` 后缀仅用于兼容已经安装的连接器，不代表客户端永久只读。实际权限完全由服务端策略决定。
 
-回调地址必须使用 ChatGPT 或 Claude 页面显示的精确地址，不接受通配符。完整配置步骤见 [客户端接入文档](docs/client-setup.md)。
+回调地址必须使用客户端实际使用的精确地址，不接受通配符。完整配置步骤见 [客户端接入文档](docs/client-setup.md)。
 
 ## 安全边界
 

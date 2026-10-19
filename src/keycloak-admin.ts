@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type OAuthProvider = "ChatGPT" | "Claude";
+export type OAuthProvider = "ChatGPT" | "Claude" | "Gemini";
 
 export interface ManagedOAuthClientDefinition {
   label: string;
@@ -40,6 +40,11 @@ export const OAUTH_PROVIDERS: Record<
   Claude: {
     clientIdPrefix: "claude-weknora",
     defaultRedirectUri: "https://claude.ai/api/mcp/auth_callback",
+  },
+  Gemini: {
+    clientIdPrefix: "gemini-weknora",
+    // Configure the exact callback from the application rather than guessing a Google URL.
+    defaultRedirectUri: "",
   },
 };
 

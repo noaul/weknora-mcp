@@ -247,6 +247,12 @@ code {
   color: #fff;
 }
 
+.client-avatar.avatar-gemini {
+  background: #4285f4;
+  box-shadow: none;
+  color: #fff;
+}
+
 .client-avatar.avatar-apikey {
   background: #5b5bd6;
   box-shadow: none;
