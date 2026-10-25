@@ -179,6 +179,7 @@ describe("embedded OAuth authorization server", () => {
     const page = await app.inject({ method: "GET", url: authorizeUrl({}, challenge) });
     expect(page.body).toContain("<strong>我的 ChatGPT</strong>");
     expect(page.headers["content-security-policy"]).toContain("form-action 'self' https://chatgpt.com");
+    expect(page.headers["referrer-policy"]).toBe("same-origin");
 
     const granted = await authorize(app, challenge);
     expect(granted.statusCode).toBe(302);
@@ -286,6 +287,21 @@ describe("embedded OAuth authorization server", () => {
     const wrong = await authorize(app, challenge, { password: "wrong password" });
     expect(wrong.statusCode).toBe(401);
     expect(wrong.body).toContain("用户名或密码错误");
+
+    const opaqueOrigin = await app.inject({
+      method: "POST",
+      url: AUTH_PATH,
+      headers: { ...FORM, origin: "null" },
+      payload: new URLSearchParams({
+        request: /name="request" value="([^"]+)"/.exec(
+          (await app.inject({ method: "GET", url: authorizeUrl({}, challenge) })).body,
+        )![1]!,
+        username: "aodo",
+        password: PASSWORD,
+      }).toString(),
+    });
+    expect(opaqueOrigin.statusCode).toBe(302);
+    expect(new URL(opaqueOrigin.headers.location as string).searchParams.get("code")).toBeTruthy();
 
     const denied = await authorize(app, challenge, { decision: "deny" });
     expect(new URL(denied.headers.location as string).searchParams.get("error")).toBe("access_denied");

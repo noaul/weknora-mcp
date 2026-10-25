@@ -204,12 +204,24 @@ describe("MCP console HTTP app", () => {
     expect(loginPage.headers["content-type"]).toContain("text/html");
     expect(loginPage.body).toContain('name="password"');
     expect(loginPage.body).toContain("/mcp-console/assets/login.css");
+    // A no-referrer page would make browsers submit the form with "Origin: null".
+    expect(loginPage.headers["referrer-policy"]).toBe("same-origin");
     await app.close();
   });
 
   it("logs in with a password and redirects to the console", async () => {
     const { app } = await createFixture();
-    const response = await submitLogin(app, { username: "aodo", password: PASSWORD });
+    const opaque = await submitLogin(
+      app,
+      { username: "aodo", password: PASSWORD },
+      { origin: "null" },
+    );
+    expect(opaque.statusCode).toBe(303);
+    const response = await submitLogin(
+      app,
+      { username: "aodo", password: PASSWORD },
+      { origin: "https://wek.uov.me" },
+    );
 
     expect(response.statusCode).toBe(303);
     expect(response.headers.location).toBe("/mcp-console/");

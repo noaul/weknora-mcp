@@ -237,6 +237,9 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
     return reply
       .code(extra.status ?? 200)
       .header("Content-Security-Policy", formCsp(request.redirectUri))
+      // With no-referrer, browsers send "Origin: null" when the form is submitted;
+      // same-origin still sends no referrer to the client's callback.
+      .header("Referrer-Policy", "same-origin")
       .type("text/html; charset=utf-8")
       .send(
         authorizePage({
@@ -297,8 +300,9 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
   });
 
   app.post(`${issuerPath}/protocol/openid-connect/auth`, async (request, reply) => {
+    // The form requires the password, so an opaque ("null") origin is harmless.
     const origin = request.headers.origin;
-    if (origin && origin !== issuerOrigin) {
+    if (origin && origin !== "null" && origin !== issuerOrigin) {
       return sendError(reply, 403, "请求来源不受信任。");
     }
     const form = authorizeFormSchema.safeParse(request.body);

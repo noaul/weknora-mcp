@@ -263,8 +263,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
         "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'",
       );
     }
+    if (!reply.hasHeader("Referrer-Policy")) reply.header("Referrer-Policy", "no-referrer");
     reply
-      .header("Referrer-Policy", "no-referrer")
       .header("X-Content-Type-Options", "nosniff")
       .header("X-Frame-Options", "DENY")
       .header("Cache-Control", "no-store");
@@ -356,6 +356,8 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   ) =>
     reply
       .code(status)
+      // With no-referrer, browsers send "Origin: null" when the form is submitted.
+      .header("Referrer-Policy", "same-origin")
       .type("text/html; charset=utf-8")
       .send(
         consoleLoginPage({
@@ -371,8 +373,9 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
   });
 
   app.post(loginPath, async (request, reply) => {
+    // The form requires the password, so an opaque ("null") origin is harmless.
     const origin = request.headers.origin;
-    if (origin && origin !== options.publicUrl.origin) {
+    if (origin && origin !== "null" && origin !== options.publicUrl.origin) {
       return reply.code(403).send({ error: "origin_not_allowed" });
     }
     const form = loginFormSchema.safeParse(request.body);
