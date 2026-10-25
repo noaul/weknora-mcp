@@ -87,6 +87,9 @@ async function main(): Promise<void> {
       throttle,
       signingKey,
       formSecret: derive("oauth-authorize-form"),
+      clientLabel: async (clientId) =>
+        (await accessPolicyStore.read()).clients.find((client) => client.clientId === clientId)
+          ?.label,
     },
     sessions,
     accessPolicyStore,

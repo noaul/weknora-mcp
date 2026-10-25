@@ -92,6 +92,8 @@ export interface OAuthServerOptions {
   signingKey: SigningKey;
   /** Secret for tamper-proof authorize forms. */
   formSecret: Buffer;
+  /** Display name of a client, e.g. its console label. */
+  clientLabel?: (clientId: string) => Promise<string | undefined>;
   now?: () => number;
 }
 
@@ -231,6 +233,7 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
     client: OAuthClientRecord,
     extra: { username?: string; error?: string; status?: number } = {},
   ) {
+    const label = (await options.clientLabel?.(client.clientId)) || client.label || client.clientId;
     return reply
       .code(extra.status ?? 200)
       .header("Content-Security-Policy", formCsp(request.redirectUri))
@@ -239,7 +242,7 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
         authorizePage({
           action: endpoints.authorizationEndpoint,
           request: signRequest(request),
-          clientLabel: client.label || client.clientId,
+          clientLabel: label,
           redirectHost: new URL(request.redirectUri).host,
           username: extra.username,
           error: extra.error,

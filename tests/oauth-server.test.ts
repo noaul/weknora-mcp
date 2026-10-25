@@ -53,6 +53,7 @@ async function createFixture() {
       throttle,
       signingKey,
       formSecret: Buffer.alloc(32, 2),
+      clientLabel: async (clientId) => (clientId === CLIENT_ID ? "我的 ChatGPT" : undefined),
     },
     sessions: new ConsoleSessionStore({ ttlMs: 60_000, secret: Buffer.alloc(32, 3) }),
     accessPolicyStore: new FileMcpAccessPolicyStore({
@@ -176,7 +177,7 @@ describe("embedded OAuth authorization server", () => {
     const { verifier, challenge } = pkce();
 
     const page = await app.inject({ method: "GET", url: authorizeUrl({}, challenge) });
-    expect(page.body).toContain("ChatGPT WeKnora");
+    expect(page.body).toContain("<strong>我的 ChatGPT</strong>");
     expect(page.headers["content-security-policy"]).toContain("form-action 'self' https://chatgpt.com");
 
     const granted = await authorize(app, challenge);
