@@ -1,7 +1,7 @@
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import {
   MCP_CAPABILITIES,
@@ -10,25 +10,24 @@ import {
   type McpAccessPolicy,
   type McpClientPolicyUpdate,
 } from "./access-policy.js";
-import type {
-  ConsoleIdentity,
-  ConsoleSession,
-  ConsoleSessionStore,
-} from "./console-auth.js";
+import type { FileAdminUserStore, LoginThrottle } from "./admin-users.js";
+import type { ConsoleSession, ConsoleSessionStore } from "./console-auth.js";
 import { SessionAuthorizationError } from "./console-auth.js";
 import type {
   ConsoleAuditWriter,
   KnowledgePolicyActor,
 } from "./knowledge-policy.js";
+import { consoleLoginPage } from "./login-page.js";
 import {
-  KeycloakAdminError,
+  OAuthClientError,
   MCP_OAUTH_SCOPE,
   OAUTH_PROVIDERS,
   validateRedirectUri,
-  type KeycloakAdminClient,
+  type FileOAuthClientStore,
   type OAuthClientState,
   type OAuthProvider,
-} from "./keycloak-admin.js";
+} from "./oauth-clients.js";
+import { registerOAuthServer, type OAuthServerOptions } from "./oauth-server.js";
 import {
   API_KEY_CLIENT_PREFIX,
   mcpClientConfig,
@@ -39,11 +38,12 @@ import {
 import type { WeKnoraKnowledgeBase } from "./weknora-api.js";
 
 const SESSION_COOKIE = "weknora_console_session";
-const OAUTH_STATE_COOKIE = "weknora_console_oauth_state";
+const LOGIN_FORM_TTL_MS = 30 * 60_000;
 
-const callbackSchema = z.object({
-  state: z.string().min(1),
-  code: z.string().min(1),
+const loginFormSchema = z.object({
+  form_token: z.string().min(1).max(200),
+  username: z.string().trim().min(1).max(100),
+  password: z.string().min(1).max(256),
 });
 
 const clientAccessUpdateSchema = z
@@ -127,14 +127,18 @@ export interface BuildConsoleAppOptions {
   publicUrl: URL;
   /** Public MCP endpoint shown in connection details; defaults to /mcp on the console host. */
   mcpUrl?: URL;
-  oidc: {
-    beginLogin(): { authorizationUrl: URL; state: string };
-    completeLogin(state: string, code: string): Promise<ConsoleIdentity>;
+  login: {
+    users: Pick<FileAdminUserStore, "verify">;
+    throttle: LoginThrottle;
+    /** Secret for login-form tokens. */
+    formSecret: Buffer;
   };
+  /** Embedded OAuth authorization server for the MCP clients. */
+  oauthServer?: OAuthServerOptions;
   sessions: ConsoleSessionStore;
   accessPolicyStore: ConsoleAccessPolicyStore;
   oauthClientManager: Pick<
-    KeycloakAdminClient,
+    FileOAuthClientStore,
     | "endpoints"
     | "listClients"
     | "createClient"
@@ -152,6 +156,7 @@ export interface BuildConsoleAppOptions {
   indexHtml: string;
   appCss?: string;
   appJs?: string;
+  loginCss?: string;
   logLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
 }
 
@@ -215,8 +220,17 @@ function sessionCookie(sessionId: string, maxAgeSeconds = 28_800): string {
   return `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/mcp-console/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Strict`;
 }
 
-function oauthStateCookie(state: string, maxAgeSeconds = 300): string {
-  return `${OAUTH_STATE_COOKIE}=${encodeURIComponent(state)}; Path=/mcp-console/oauth/callback; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+function loginFormToken(secret: Buffer, issuedAt: number): string {
+  const mac = createHmac("sha256", secret).update(`console-login:${issuedAt}`).digest("base64url");
+  return `${issuedAt}.${mac}`;
+}
+
+function loginFormTokenValid(secret: Buffer, token: string, now: number): boolean {
+  const issuedAt = Number(token.split(".")[0]);
+  if (!Number.isSafeInteger(issuedAt) || issuedAt + LOGIN_FORM_TTL_MS < now) return false;
+  const expected = Buffer.from(loginFormToken(secret, issuedAt));
+  const presented = Buffer.from(token);
+  return expected.length === presented.length && timingSafeEqual(expected, presented);
 }
 
 export function buildConsoleApp(options: BuildConsoleAppOptions) {
@@ -230,11 +244,26 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     },
     logController: new LogController({ disableRequestLogging: true }),
     bodyLimit: 64 * 1024,
+    // OpenResty on the same host forwards the client address.
+    trustProxy: (address) => address === "127.0.0.1" || address === "::1",
   });
 
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_request, body, done) => {
+      done(null, Object.fromEntries(new URLSearchParams(body as string)));
+    },
+  );
+
   app.addHook("onSend", async (_request, reply, payload) => {
+    if (!reply.hasHeader("Content-Security-Policy")) {
+      reply.header(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'",
+      );
+    }
     reply
-      .header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'")
       .header("Referrer-Policy", "no-referrer")
       .header("X-Content-Type-Options", "nosniff")
       .header("X-Frame-Options", "DENY")
@@ -315,40 +344,65 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
     reply.type("text/javascript; charset=utf-8").send(options.appJs ?? ""),
   );
 
-  app.get("/mcp-console/login", async (_request, reply) => {
-    const login = options.oidc.beginLogin();
-    return reply
-      .header("Set-Cookie", oauthStateCookie(login.state))
-      .redirect(login.authorizationUrl.toString());
+  app.get("/mcp-console/assets/login.css", async (_request, reply) =>
+    reply.type("text/css; charset=utf-8").send(options.loginCss ?? ""),
+  );
+
+  const loginPath = "/mcp-console/login";
+  const renderLogin = (
+    reply: FastifyReply,
+    status: number,
+    extra: { username?: string; error?: string } = {},
+  ) =>
+    reply
+      .code(status)
+      .type("text/html; charset=utf-8")
+      .send(
+        consoleLoginPage({
+          action: loginPath,
+          formToken: loginFormToken(options.login.formSecret, Date.now()),
+          ...extra,
+        }),
+      );
+
+  app.get(loginPath, async (request, reply) => {
+    if (requestSession(request)) return reply.redirect(options.publicUrl.pathname);
+    return renderLogin(reply, 200);
   });
 
-  app.get("/mcp-console/oauth/callback", async (request, reply) => {
-    const parsed = callbackSchema.safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_oauth_callback" });
-    const browserState = parseCookies(request.headers.cookie)[OAUTH_STATE_COOKIE];
-    if (browserState !== parsed.data.state) {
-      return reply
-        .header("Set-Cookie", oauthStateCookie("", 0))
-        .code(403)
-        .send({ error: "oauth_state_mismatch" });
+  app.post(loginPath, async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin && origin !== options.publicUrl.origin) {
+      return reply.code(403).send({ error: "origin_not_allowed" });
     }
-    try {
-      const identity = await options.oidc.completeLogin(
-        parsed.data.state,
-        parsed.data.code,
-      );
-      const session = options.sessions.create(identity);
-      return reply
-        .header("Set-Cookie", [
-          sessionCookie(session.id),
-          oauthStateCookie("", 0),
-        ])
-        .redirect(options.publicUrl.pathname);
-    } catch (error) {
-      request.log.warn({ error: error instanceof Error ? error.name : "UnknownError" });
-      return reply.code(403).send({ error: "oauth_login_failed" });
+    const form = loginFormSchema.safeParse(request.body);
+    if (!form.success || !loginFormTokenValid(options.login.formSecret, form.data.form_token, Date.now())) {
+      return renderLogin(reply, 400, { error: "登录页面已过期，请重新输入。" });
     }
+    const ip = request.ip;
+    if (options.login.throttle.blocked(ip)) {
+      return renderLogin(reply, 429, {
+        username: form.data.username,
+        error: "失败次数过多，请 15 分钟后再试。",
+      });
+    }
+    const identity = await options.login.users.verify(form.data.username, form.data.password);
+    if (!identity) {
+      options.login.throttle.fail(ip);
+      request.log.warn("console login failed");
+      return renderLogin(reply, 401, {
+        username: form.data.username,
+        error: "用户名或密码错误。",
+      });
+    }
+    options.login.throttle.reset(ip);
+    const session = options.sessions.create(identity);
+    return reply
+      .header("Set-Cookie", sessionCookie(session.id))
+      .redirect(options.publicUrl.pathname, 303);
   });
+
+  if (options.oauthServer) registerOAuthServer(app, options.oauthServer);
 
   app.get("/mcp-console/api/session", async (request, reply) => {
     const session = await requireSession(request, reply);
@@ -514,12 +568,11 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
         body.data.redirectUri ?? OAUTH_PROVIDERS[provider].defaultRedirectUri,
       );
     } catch (error) {
-      if (error instanceof KeycloakAdminError) {
+      if (error instanceof OAuthClientError) {
         return reply.code(400).send({ error: "invalid_credential_request" });
       }
       throw error;
     }
-    const existing = (await options.accessPolicyStore.read()).clients;
     const clientId = `${OAUTH_PROVIDERS[provider].clientIdPrefix}-${randomBytes(3).toString("hex")}`;
     let created: Awaited<ReturnType<typeof options.oauthClientManager.createClient>>;
     try {
@@ -527,13 +580,10 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
         clientId,
         label: body.data.label,
         redirectUri,
-        templateClientIds: existing
-          .filter((client) => client.provider in OAUTH_PROVIDERS)
-          .map((client) => client.clientId),
       });
     } catch (error) {
       request.log.warn({ error: error instanceof Error ? error.message : "UnknownError" });
-      return reply.code(error instanceof KeycloakAdminError ? 502 : 500).send({
+      return reply.code(error instanceof OAuthClientError ? 502 : 500).send({
         error: "oauth_client_creation_failed",
       });
     }
@@ -634,7 +684,7 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       if (error instanceof StaticTokenError) {
         return reply.code(404).send({ error: "api_key_not_found" });
       }
-      if (error instanceof KeycloakAdminError) {
+      if (error instanceof OAuthClientError) {
         request.log.warn({ error: error.message });
         return reply.code(502).send({ error: "oauth_client_update_failed" });
       }

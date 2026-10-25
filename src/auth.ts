@@ -30,6 +30,8 @@ export class AuthorizationError extends Error {
 export interface AuthenticatedPrincipal {
   subject: string;
   clientId?: string;
+  /** OAuth grant (authorization session) the access token belongs to. */
+  grantId?: string;
   scopes: string[];
 }
 
@@ -79,6 +81,7 @@ export function createJwtAccessTokenVerifier(options: JwtVerifierOptions) {
       const clientIdClaim = result.payload.azp ?? result.payload.client_id;
       const principal: AuthenticatedPrincipal = { subject, scopes };
       if (typeof clientIdClaim === "string") principal.clientId = clientIdClaim;
+      if (typeof result.payload.sid === "string") principal.grantId = result.payload.sid;
       return principal;
     } catch (error) {
       if (error instanceof AuthorizationError || error instanceof AuthenticationError) {
@@ -118,6 +121,7 @@ export function createRemoteJwtAccessTokenVerifier(options: {
       const clientIdClaim = result.payload.azp ?? result.payload.client_id;
       const principal: AuthenticatedPrincipal = { subject, scopes };
       if (typeof clientIdClaim === "string") principal.clientId = clientIdClaim;
+      if (typeof result.payload.sid === "string") principal.grantId = result.payload.sid;
       return principal;
     } catch (error) {
       if (error instanceof AuthorizationError || error instanceof AuthenticationError) {

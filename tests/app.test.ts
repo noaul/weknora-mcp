@@ -30,6 +30,7 @@ const config: GatewayConfig = {
   accessPolicyFile: "/var/lib/weknora-mcp-console/access-policy.json",
   auditFile: "/var/lib/weknora-mcp-console/audit.ndjson",
   staticTokenFile: "/var/lib/weknora-mcp-console/static-tokens.json",
+  oauthClientFile: "/var/lib/weknora-mcp-console/oauth-clients.json",
   sessionOwnershipFile: "/var/lib/weknora-mcp-access-gateway/session-owners.json",
   importRoot: "C:\\weknora-import",
   allowedOrigins: ["https://chatgpt.com", "https://claude.ai"],

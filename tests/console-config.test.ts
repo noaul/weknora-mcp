@@ -7,17 +7,6 @@ const validEnv = {
   CONSOLE_PORT: "18198",
   CONSOLE_PUBLIC_URL: "https://wek.uov.me/mcp-console/",
   OAUTH_ISSUER: "https://wek.uov.me/oauth/realms/weknora",
-  OAUTH_JWKS_URL:
-    "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/certs",
-  OAUTH_TOKEN_URL:
-    "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/token",
-  OAUTH_CLIENT_ID: "weknora-mcp-console",
-  OAUTH_CLIENT_SECRET_FILE: "/run/secrets/oauth-client",
-  OAUTH_REQUIRED_ROLE: "weknora-admin",
-  KEYCLOAK_ADMIN_URL:
-    "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
-  KEYCLOAK_SERVICE_CLIENT_ID: "weknora-mcp-console-admin",
-  KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: "/run/secrets/keycloak-admin-client",
   SESSION_SECRET_FILE: "/run/secrets/session",
   MCP_ACCESS_POLICY_FILE: "/var/lib/weknora-mcp-console/access-policy.json",
   MCP_AUDIT_FILE: "/var/lib/weknora-mcp-console/audit.ndjson",
@@ -34,19 +23,24 @@ describe("console configuration", () => {
 
     expect(config.port).toBe(18198);
     expect(config.publicUrl.href).toBe("https://wek.uov.me/mcp-console/");
-    expect(config.callbackUrl.href).toBe(
-      "https://wek.uov.me/mcp-console/oauth/callback",
-    );
-    expect(config.requiredRole).toBe("weknora-admin");
-    expect(config.tokenUrl.href).toBe(
-      "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/token",
-    );
+    expect(config.issuer.href).toBe("https://wek.uov.me/oauth/realms/weknora");
+    expect(config.mcpUrl.href).toBe("https://wek.uov.me/mcp");
+    expect(config.oauthClientFile).toBe("/var/lib/weknora-mcp-console/oauth-clients.json");
+    expect(config.signingKeyFile).toBe("/var/lib/weknora-mcp-console/oauth-signing-key.json");
+    expect(config.adminUsersFile).toBe("/var/lib/weknora-mcp-console/admin-users.json");
     expect(config.fallbackKnowledgeBase.name).toBe("镍基合金");
-    expect(config.keycloakAdminUrl.href).toBe(
-      "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
-    );
     expect(config.policyFile).toContain("access-policy.json");
     expect(config.gatewayHealthUrl.href).toBe("http://127.0.0.1:18194/readyz");
+  });
+
+  it("ignores the settings of the former Keycloak deployment", () => {
+    const config = parseConsoleConfig({
+      ...validEnv,
+      OAUTH_JWKS_URL: "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/certs",
+      OAUTH_CLIENT_ID: "weknora-mcp-console",
+      KEYCLOAK_ADMIN_URL: "http://127.0.0.1:18195/oauth/admin/realms/weknora/",
+    });
+    expect(config.issuer.href).toBe("https://wek.uov.me/oauth/realms/weknora");
   });
 
   it("rejects public HTTP and non-loopback internal services", () => {
@@ -59,21 +53,13 @@ describe("console configuration", () => {
     expect(() =>
       parseConsoleConfig({
         ...validEnv,
+        OAUTH_ISSUER: "http://wek.uov.me/oauth/realms/weknora",
+      }),
+    ).toThrow(/HTTPS/i);
+    expect(() =>
+      parseConsoleConfig({
+        ...validEnv,
         WEKNORA_API_URL: "http://10.0.0.4:18091/api/v1/",
-      }),
-    ).toThrow(/loopback/i);
-    expect(() =>
-      parseConsoleConfig({
-        ...validEnv,
-        OAUTH_TOKEN_URL:
-          "http://10.0.0.4:18195/oauth/realms/weknora/protocol/openid-connect/token",
-      }),
-    ).toThrow(/loopback/i);
-    expect(() =>
-      parseConsoleConfig({
-        ...validEnv,
-        KEYCLOAK_ADMIN_URL:
-          "http://10.0.0.4:18195/oauth/admin/realms/weknora/",
       }),
     ).toThrow(/loopback/i);
   });

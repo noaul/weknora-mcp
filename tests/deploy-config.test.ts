@@ -41,18 +41,18 @@ describe("unified MCP deployment", () => {
     expect(text.join("\n")).not.toMatch(/18196|18197|\/mcp-admin/);
   });
 
-  it("configures one MCP scope for two retained OAuth clients", async () => {
-    const script = await readFile("deploy/scripts/configure-keycloak.sh", "utf8");
-    const env = await readFile("deploy/keycloak.env.example", "utf8");
+  it("ships no Keycloak deployment assets", async () => {
+    const deploy = await readdir("deploy");
+    const scripts = await readdir("deploy/scripts");
+    const gateway = await readFile("deploy/systemd/gateway.env.example", "utf8");
 
-    expect(script).toContain("'weknora:mcp' 'https://wek.uov.me/mcp'");
-    expect(script).toContain("chatgpt-weknora-read");
-    expect(script).toContain("claude-weknora-read");
-    expect(script).toContain("remove_obsolete_client");
-    expect(script).not.toMatch(/read_scope_id|admin_scope_id/);
-    expect(script.match(/'weknora:read'/g)).toHaveLength(3);
-    expect(script.match(/'weknora:admin'/g)).toHaveLength(1);
-    expect(env).not.toMatch(/CHATGPT_ADMIN|CLAUDE_ADMIN/);
+    expect(deploy).not.toContain("keycloak");
+    expect(deploy).not.toContain("keycloak-compose.yml");
+    expect(scripts).not.toContain("configure-keycloak.sh");
+    expect(gateway).toContain(
+      "OAUTH_JWKS_URL=http://127.0.0.1:18198/oauth/realms/weknora/protocol/openid-connect/certs",
+    );
+    expect(gateway).toContain("MCP_OAUTH_CLIENT_FILE=/var/lib/weknora-mcp-console/oauth-clients.json");
   });
 
   it("probes only the unified MCP endpoint", async () => {

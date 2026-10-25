@@ -77,16 +77,16 @@ describe("parseConfig", () => {
       parseConfig({
         ...validEnv,
         OAUTH_JWKS_URL:
-          "http://127.0.0.1:18195/oauth/realms/weknora/protocol/openid-connect/certs",
+          "http://127.0.0.1:18198/oauth/realms/weknora/protocol/openid-connect/certs",
       }).oauthJwksUrl.href,
-    ).toContain("127.0.0.1:18195");
+    ).toContain("127.0.0.1:18198");
   });
 
   it("rejects a public HTTP JWKS endpoint", () => {
     expect(() =>
       parseConfig({
         ...validEnv,
-        OAUTH_JWKS_URL: "http://keycloak.example/realms/weknora/certs",
+        OAUTH_JWKS_URL: "http://auth.example/oauth/realms/weknora/certs",
       }),
     ).toThrow(/OAUTH_JWKS_URL.*HTTPS.*loopback/i);
   });

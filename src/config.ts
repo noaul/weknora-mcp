@@ -27,6 +27,10 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default("/var/lib/weknora-mcp-console/static-tokens.json"),
+  MCP_OAUTH_CLIENT_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/oauth-clients.json"),
   MCP_SESSION_OWNERSHIP_FILE: z
     .string()
     .min(1)
@@ -61,6 +65,7 @@ export interface GatewayConfig {
   accessPolicyFile: string;
   auditFile: string;
   staticTokenFile: string;
+  oauthClientFile: string;
   sessionOwnershipFile: string;
   importRoot: string;
   allowedOrigins: string[];
@@ -128,6 +133,7 @@ export function parseConfig(env: NodeJS.ProcessEnv | Record<string, string>): Ga
     accessPolicyFile: parsed.data.MCP_ACCESS_POLICY_FILE,
     auditFile: parsed.data.MCP_AUDIT_FILE,
     staticTokenFile: parsed.data.MCP_STATIC_TOKEN_FILE,
+    oauthClientFile: parsed.data.MCP_OAUTH_CLIENT_FILE,
     sessionOwnershipFile: parsed.data.MCP_SESSION_OWNERSHIP_FILE,
     importRoot: parsed.data.ADMIN_IMPORT_ROOT,
     allowedOrigins: parsed.data.ALLOWED_ORIGINS.split(",")

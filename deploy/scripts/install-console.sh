@@ -49,11 +49,13 @@ ensure_env_setting() {
   fi
 }
 
-ensure_env_setting KEYCLOAK_ADMIN_URL \
-  http://127.0.0.1:18195/oauth/admin/realms/weknora/
-ensure_env_setting KEYCLOAK_SERVICE_CLIENT_ID weknora-mcp-console-admin
-ensure_env_setting KEYCLOAK_SERVICE_CLIENT_SECRET_FILE \
-  /etc/weknora-mcp-console/keycloak-admin-client-secret
+ensure_env_setting PUBLIC_MCP_URL https://wek.uov.me/mcp
+ensure_env_setting MCP_OAUTH_CLIENT_FILE \
+  /var/lib/weknora-mcp-console/oauth-clients.json
+ensure_env_setting OAUTH_SIGNING_KEY_FILE \
+  /var/lib/weknora-mcp-console/oauth-signing-key.json
+ensure_env_setting ADMIN_USERS_FILE \
+  /var/lib/weknora-mcp-console/admin-users.json
 ensure_env_setting MCP_ACCESS_POLICY_FILE \
   /var/lib/weknora-mcp-console/access-policy.json
 ensure_env_setting MCP_AUDIT_FILE \
@@ -63,4 +65,6 @@ ensure_env_setting MCP_STATIC_TOKEN_FILE \
   /var/lib/weknora-mcp-console/static-tokens.json
 
 systemctl daemon-reload
-echo "Unified MCP console, policy, and import directories installed. Add the four secret files before starting the service."
+echo "Unified MCP console, policy, and import directories installed."
+echo "Add the session-secret and weknora-api-key files, then create the administrator:"
+echo "  sudo -u weknora-console node $repo_root/dist/scripts/set-admin-password.js <username>"

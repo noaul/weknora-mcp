@@ -1,12 +1,15 @@
+import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { FileMcpAccessPolicyStore } from "./access-policy.js";
+import { FileAdminUserStore, LoginThrottle } from "./admin-users.js";
 import { buildConsoleApp } from "./console-app.js";
-import { ConsoleOidcClient, ConsoleSessionStore } from "./console-auth.js";
+import { ConsoleSessionStore } from "./console-auth.js";
 import { parseConsoleConfig } from "./console-config.js";
-import { KeycloakAdminClient } from "./keycloak-admin.js";
 import { MANAGED_ACCESS_CLIENTS, migrateApiKeyClients } from "./managed-clients.js";
+import { FileOAuthClientStore } from "./oauth-clients.js";
+import { loadOrCreateSigningKey } from "./oauth-server.js";
 import { FileStaticTokenStore } from "./static-tokens.js";
 import { WeKnoraApiClient } from "./weknora-api.js";
 
@@ -27,38 +30,26 @@ async function healthStatus(url: URL): Promise<"healthy" | "unavailable"> {
 
 async function main(): Promise<void> {
   const config = parseConsoleConfig(process.env);
-  const [
-    clientSecret,
-    keycloakServiceClientSecret,
-    sessionSecret,
-    weknoraApiKey,
-    indexHtml,
-    appCss,
-    appJs,
-  ] =
+  const [sessionSecret, weknoraApiKey, indexHtml, appCss, appJs, loginCss, signingKey] =
     await Promise.all([
-      readSecret(config.clientSecretFile, "OAuth client secret"),
-      readSecret(
-        config.keycloakServiceClientSecretFile,
-        "Keycloak service client secret",
-      ),
       readSecret(config.sessionSecretFile, "Session secret"),
       readSecret(config.weknoraApiKeyFile, "WeKnora API key"),
       readFile(resolve("console/index.html"), "utf8"),
       readFile(resolve("console/app.css"), "utf8"),
       readFile(resolve("console/app.js"), "utf8"),
+      readFile(resolve("console/login.css"), "utf8"),
+      loadOrCreateSigningKey(config.signingKeyFile),
     ]);
   const issuer = config.issuer.toString().replace(/\/$/, "");
-  const oidc = new ConsoleOidcClient({
-    issuer,
-    authorizationEndpoint: `${issuer}/protocol/openid-connect/auth`,
-    tokenEndpoint: config.tokenUrl.toString(),
-    jwksUrl: config.jwksUrl.toString(),
-    clientId: config.clientId,
-    clientSecret,
-    callbackUrl: config.callbackUrl.toString(),
-    requiredRole: config.requiredRole,
-  });
+  const derive = (label: string) =>
+    createHmac("sha256", sessionSecret).update(label).digest();
+  const users = new FileAdminUserStore({ file: config.adminUsersFile });
+  if (!(await users.hasUsers())) {
+    console.warn(
+      "No console administrator exists; run `node dist/scripts/set-admin-password.js <username>`",
+    );
+  }
+  const throttle = new LoginThrottle();
   const sessions = new ConsoleSessionStore({
     ttlMs: 8 * 60 * 60_000,
     secret: Buffer.from(sessionSecret, "utf8"),
@@ -80,16 +71,23 @@ async function main(): Promise<void> {
     baseUrl: config.weknoraApiUrl,
     apiKey: weknoraApiKey,
   });
-  const oauthClientManager = new KeycloakAdminClient({
-    adminBaseUrl: config.keycloakAdminUrl,
-    tokenUrl: config.tokenUrl,
-    publicIssuer: issuer,
-    serviceClientId: config.keycloakServiceClientId,
-    serviceClientSecret: keycloakServiceClientSecret,
+  const oauthClientManager = new FileOAuthClientStore({
+    file: config.oauthClientFile,
+    issuer,
   });
   const app = buildConsoleApp({
     publicUrl: config.publicUrl,
-    oidc,
+    mcpUrl: config.mcpUrl,
+    login: { users, throttle, formSecret: derive("console-login-form") },
+    oauthServer: {
+      issuer,
+      resource: config.mcpUrl.toString(),
+      clients: oauthClientManager,
+      users,
+      throttle,
+      signingKey,
+      formSecret: derive("oauth-authorize-form"),
+    },
     sessions,
     accessPolicyStore,
     oauthClientManager,
@@ -101,6 +99,7 @@ async function main(): Promise<void> {
     indexHtml,
     appCss,
     appJs,
+    loginCss,
     logLevel: config.logLevel,
   });
 

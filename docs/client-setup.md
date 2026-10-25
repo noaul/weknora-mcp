@@ -52,7 +52,7 @@ callbacks and secrets are preserved during the unified-client migration.
 1. Add or refresh the remote MCP connector.
 2. Enter `https://wek.uov.me/mcp`.
 3. Enter Client ID `chatgpt-weknora-read` and its Client Secret.
-4. Complete the Keycloak login and consent flow.
+4. Sign in with the console administrator account on the authorization page.
 5. Refresh actions after changing permissions in the management console.
 
 ## Claude
@@ -60,7 +60,7 @@ callbacks and secrets are preserved during the unified-client migration.
 1. Open custom connector setup.
 2. Enter `https://wek.uov.me/mcp`.
 3. Enter Client ID `claude-weknora-read` and its Client Secret.
-4. Complete the Keycloak login and consent flow.
+4. Sign in with the console administrator account on the authorization page.
 5. Reconnect or refresh tools after changing permissions.
 
 ## Gemini web
@@ -74,12 +74,12 @@ callbacks and secrets are preserved during the unified-client migration.
    an exact HTTPS URL without wildcards.
 4. Expand **Additional settings** in Gemini. Copy the new credential's **Client ID**
    into **Client ID** and its one-time **Client Secret** into **Client secret**.
-5. Click **Next** and complete the Keycloak login and consent flow.
+5. Click **Next** and sign in with the console administrator account on the authorization page.
 6. Manage capabilities and knowledge-base access in that credential's console tab.
    Reconnect or refresh tools in Gemini after changing permissions.
 
 Gemini credentials are created on demand, so existing deployments do not need a
-seeded Gemini Keycloak client or a policy migration. Each credential defaults to
+seeded Gemini OAuth client or a policy migration. Each credential defaults to
 read-only access on the default knowledge base.
 
 ## Credentials and permissions
@@ -89,7 +89,7 @@ integration page has a `连接信息` tab (shared MCP URL and authentication
 details), one tab per credential, and a `新增` tab. Every credential has its own
 capabilities and knowledge-base scope.
 
-- ChatGPT / Claude / Gemini: each credential is a separate Keycloak OAuth client
+- ChatGPT / Claude / Gemini: each credential is a separate OAuth client of the embedded authorization server
   (`chatgpt-weknora-xxxxxx`, `claude-weknora-xxxxxx`, `gemini-weknora-xxxxxx`) with its own Client ID,
   Client Secret, callback URL, and sessions. The Client Secret is shown once
   after creation or rotation.

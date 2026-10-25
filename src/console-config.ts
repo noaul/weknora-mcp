@@ -5,14 +5,19 @@ const schema = z.object({
   CONSOLE_PORT: z.coerce.number().int().min(1).max(65_535).default(18_198),
   CONSOLE_PUBLIC_URL: z.string().url(),
   OAUTH_ISSUER: z.string().url(),
-  OAUTH_JWKS_URL: z.string().url(),
-  OAUTH_TOKEN_URL: z.string().url(),
-  OAUTH_CLIENT_ID: z.string().min(1),
-  OAUTH_CLIENT_SECRET_FILE: z.string().min(1),
-  OAUTH_REQUIRED_ROLE: z.string().min(1).default("weknora-admin"),
-  KEYCLOAK_ADMIN_URL: z.string().url(),
-  KEYCLOAK_SERVICE_CLIENT_ID: z.string().min(1),
-  KEYCLOAK_SERVICE_CLIENT_SECRET_FILE: z.string().min(1),
+  PUBLIC_MCP_URL: z.string().url().optional(),
+  MCP_OAUTH_CLIENT_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/oauth-clients.json"),
+  OAUTH_SIGNING_KEY_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/oauth-signing-key.json"),
+  ADMIN_USERS_FILE: z
+    .string()
+    .min(1)
+    .default("/var/lib/weknora-mcp-console/admin-users.json"),
   SESSION_SECRET_FILE: z.string().min(1),
   MCP_ACCESS_POLICY_FILE: z.string().min(1),
   MCP_AUDIT_FILE: z.string().min(1),
@@ -34,16 +39,12 @@ export interface ConsoleConfig {
   host: string;
   port: number;
   publicUrl: URL;
-  callbackUrl: URL;
   issuer: URL;
-  jwksUrl: URL;
-  tokenUrl: URL;
-  clientId: string;
-  clientSecretFile: string;
-  requiredRole: string;
-  keycloakAdminUrl: URL;
-  keycloakServiceClientId: string;
-  keycloakServiceClientSecretFile: string;
+  /** The protected MCP resource and audience of OAuth access tokens. */
+  mcpUrl: URL;
+  oauthClientFile: string;
+  signingKeyFile: string;
+  adminUsersFile: string;
   sessionSecretFile: string;
   policyFile: string;
   auditFile: string;
@@ -66,11 +67,6 @@ function requireLoopback(name: string, url: URL): void {
   }
 }
 
-function requireHttpsOrLoopback(name: string, url: URL): void {
-  if (url.protocol === "https:") return;
-  requireLoopback(name, url);
-}
-
 export function parseConsoleConfig(
   env: NodeJS.ProcessEnv | Record<string, string>,
 ): ConsoleConfig {
@@ -80,17 +76,13 @@ export function parseConsoleConfig(
   }
   const publicUrl = new URL(parsed.data.CONSOLE_PUBLIC_URL);
   const issuer = new URL(parsed.data.OAUTH_ISSUER);
-  const jwksUrl = new URL(parsed.data.OAUTH_JWKS_URL);
-  const tokenUrl = new URL(parsed.data.OAUTH_TOKEN_URL);
-  const keycloakAdminUrl = new URL(parsed.data.KEYCLOAK_ADMIN_URL);
+  const mcpUrl = new URL(parsed.data.PUBLIC_MCP_URL ?? new URL("/mcp", publicUrl).toString());
   const weknoraApiUrl = new URL(parsed.data.WEKNORA_API_URL);
   const gatewayHealthUrl = new URL(parsed.data.GATEWAY_HEALTH_URL);
 
   requireHttps("CONSOLE_PUBLIC_URL", publicUrl);
   requireHttps("OAUTH_ISSUER", issuer);
-  requireHttpsOrLoopback("OAUTH_JWKS_URL", jwksUrl);
-  requireLoopback("OAUTH_TOKEN_URL", tokenUrl);
-  requireLoopback("KEYCLOAK_ADMIN_URL", keycloakAdminUrl);
+  requireHttps("PUBLIC_MCP_URL", mcpUrl);
   requireLoopback("WEKNORA_API_URL", weknoraApiUrl);
   requireLoopback("GATEWAY_HEALTH_URL", gatewayHealthUrl);
 
@@ -102,17 +94,11 @@ export function parseConsoleConfig(
     host: parsed.data.CONSOLE_HOST,
     port: parsed.data.CONSOLE_PORT,
     publicUrl,
-    callbackUrl: new URL("oauth/callback", publicUrl),
     issuer,
-    jwksUrl,
-    tokenUrl,
-    clientId: parsed.data.OAUTH_CLIENT_ID,
-    clientSecretFile: parsed.data.OAUTH_CLIENT_SECRET_FILE,
-    requiredRole: parsed.data.OAUTH_REQUIRED_ROLE,
-    keycloakAdminUrl,
-    keycloakServiceClientId: parsed.data.KEYCLOAK_SERVICE_CLIENT_ID,
-    keycloakServiceClientSecretFile:
-      parsed.data.KEYCLOAK_SERVICE_CLIENT_SECRET_FILE,
+    mcpUrl,
+    oauthClientFile: parsed.data.MCP_OAUTH_CLIENT_FILE,
+    signingKeyFile: parsed.data.OAUTH_SIGNING_KEY_FILE,
+    adminUsersFile: parsed.data.ADMIN_USERS_FILE,
     sessionSecretFile: parsed.data.SESSION_SECRET_FILE,
     policyFile: parsed.data.MCP_ACCESS_POLICY_FILE,
     auditFile: parsed.data.MCP_AUDIT_FILE,

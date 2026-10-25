@@ -250,7 +250,7 @@ function currentIntegration() {
 
 function credentialStatus(credential) {
   if (!credential.exists) {
-    return badge(credential.kind === "token" ? "Key 缺失" : "Keycloak 中缺失", "off");
+    return badge(credential.kind === "token" ? "Key 缺失" : "OAuth 客户端缺失", "off");
   }
   return credential.enabled ? badge("已启用", "ok") : badge("已停用", "off");
 }
@@ -459,7 +459,7 @@ function renderOverview() {
     ),
   );
   if (state.data.oauth.unavailable) {
-    elements.services.append(row("Keycloak", "OAuth 凭据状态暂时无法读取", badge("不可用", "off")));
+    elements.services.append(row("OAuth", "OAuth 凭据状态暂时无法读取", badge("不可用", "off")));
   }
   elements.updated.textContent = `更新于 ${new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
@@ -949,7 +949,7 @@ function renderDangerZone(parent, credential) {
     row(
       oauth ? "删除凭据" : "删除 Key",
       oauth
-        ? "从 Keycloak 删除该 OAuth 客户端，已连接的客户端将无法再授权"
+        ? "删除该 OAuth 客户端及其全部会话，已连接的客户端立即失效且无法再授权"
         : "删除后使用该 Key 的客户端立即无法访问，且无法恢复",
       button("删除", "danger", () =>
         confirmAction(

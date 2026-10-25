@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { FileMcpAccessPolicyStore } from "../src/access-policy.js";
+import { LoginThrottle } from "../src/admin-users.js";
 import { buildConsoleApp } from "../src/console-app.js";
 import { ConsoleSessionStore } from "../src/console-auth.js";
-import type { OAuthClientState } from "../src/keycloak-admin.js";
+import type { OAuthClientState } from "../src/oauth-clients.js";
 import { MANAGED_ACCESS_CLIENTS } from "../src/managed-clients.js";
 import { FileStaticTokenStore } from "../src/static-tokens.js";
 
@@ -15,7 +16,9 @@ const KB_A = "51adf856-2722-4a62-be49-b7d1f2cd20b4";
 const KB_B = "14f18c87-26b4-4b51-ac9f-cb57ace46df7";
 const CHATGPT_CLIENT_ID = "chatgpt-weknora-read";
 
-function fakeKeycloak() {
+const PASSWORD = "correct horse battery";
+
+function fakeOAuthClients() {
   const clients = new Map<string, OAuthClientState>([
     [
       CHATGPT_CLIENT_ID,
@@ -112,19 +115,18 @@ async function createFixture() {
   const writeClient = vi.spyOn(policyStore, "writeClient");
   const appendAudit = vi.spyOn(policyStore, "appendAudit");
   const staticTokens = new FileStaticTokenStore({ file: join(root, "tokens.json") });
-  const oauthClientManager = fakeKeycloak();
+  const oauthClientManager = fakeOAuthClients();
+  const verify = vi.fn(async (username: string, password: string) =>
+    username === "aodo" && password === PASSWORD
+      ? { subject: "user-1", username: "aodo", roles: ["weknora-admin"] }
+      : undefined,
+  );
   const app = buildConsoleApp({
     publicUrl: new URL("https://wek.uov.me/mcp-console/"),
-    oidc: {
-      beginLogin: () => ({
-        state: "state-1",
-        authorizationUrl: new URL("https://wek.uov.me/oauth/login?state=state-1"),
-      }),
-      completeLogin: vi.fn(async () => ({
-        subject: "user-1",
-        username: "aodo",
-        roles: ["weknora-admin"],
-      })),
+    login: {
+      users: { verify },
+      throttle: new LoginThrottle({ perIp: 3, global: 50, windowMs: 60_000 }),
+      formSecret: Buffer.alloc(32, 5),
     },
     sessions,
     accessPolicyStore: policyStore,
@@ -154,22 +156,27 @@ async function createFixture() {
     indexHtml: "<!doctype html><title>MCP Console</title>",
     logLevel: "silent",
   });
-  return { app, policyStore, writeClient, appendAudit, staticTokens, oauthClientManager };
+  return { app, policyStore, writeClient, appendAudit, staticTokens, oauthClientManager, verify };
+}
+
+async function submitLogin(
+  app: ReturnType<typeof buildConsoleApp>,
+  fields: { username: string; password: string; form_token?: string },
+  headers: Record<string, string> = {},
+) {
+  const page = await app.inject({ method: "GET", url: "/mcp-console/login" });
+  const formToken = /name="form_token" value="([^"]+)"/.exec(page.body)?.[1];
+  if (!formToken) throw new Error("Missing login form token");
+  return app.inject({
+    method: "POST",
+    url: "/mcp-console/login",
+    headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+    payload: new URLSearchParams({ form_token: formToken, ...fields }).toString(),
+  });
 }
 
 async function login(app: ReturnType<typeof buildConsoleApp>) {
-  const start = await app.inject({ method: "GET", url: "/mcp-console/login" });
-  const stateCookieHeader = start.headers["set-cookie"];
-  const stateCookie = (Array.isArray(stateCookieHeader)
-    ? stateCookieHeader[0]
-    : stateCookieHeader
-  )?.split(";")[0];
-  if (!stateCookie) throw new Error("Missing OAuth state cookie");
-  const response = await app.inject({
-    method: "GET",
-    url: "/mcp-console/oauth/callback?state=state-1&code=code-1",
-    headers: { cookie: stateCookie },
-  });
+  const response = await submitLogin(app, { username: "aodo", password: PASSWORD });
   const setCookie = response.headers["set-cookie"];
   const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(";")[0];
   if (!cookie) throw new Error("Missing session cookie");
@@ -186,24 +193,72 @@ async function csrf(app: ReturnType<typeof buildConsoleApp>, cookie: string) {
 }
 
 describe("MCP console HTTP app", () => {
-  it("redirects logged-out users through OIDC", async () => {
+  it("redirects logged-out users to the password login page", async () => {
     const { app } = await createFixture();
     const page = await app.inject({ method: "GET", url: "/mcp-console/" });
-    const loginResponse = await app.inject({ method: "GET", url: "/mcp-console/login" });
+    const loginPage = await app.inject({ method: "GET", url: "/mcp-console/login" });
 
     expect(page.statusCode).toBe(302);
-    expect(loginResponse.headers.location).toContain("/oauth/login");
+    expect(page.headers.location).toBe("/mcp-console/login");
+    expect(loginPage.statusCode).toBe(200);
+    expect(loginPage.headers["content-type"]).toContain("text/html");
+    expect(loginPage.body).toContain('name="password"');
+    expect(loginPage.body).toContain("/mcp-console/assets/login.css");
     await app.close();
   });
 
-  it("rejects an OAuth callback that is not bound to the initiating browser", async () => {
+  it("logs in with a password and redirects to the console", async () => {
     const { app } = await createFixture();
-    const callback = await app.inject({
-      method: "GET",
-      url: "/mcp-console/oauth/callback?state=state-1&code=code-1",
-    });
+    const response = await submitLogin(app, { username: "aodo", password: PASSWORD });
 
-    expect(callback.statusCode).toBe(403);
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe("/mcp-console/");
+    expect(String(response.headers["set-cookie"])).toMatch(
+      /weknora_console_session=.+; Path=\/mcp-console\/;.*HttpOnly; Secure; SameSite=Strict/,
+    );
+    const cookie = String(response.headers["set-cookie"]).split(";")[0]!;
+    const session = await app.inject({
+      method: "GET",
+      url: "/mcp-console/api/session",
+      headers: { cookie },
+    });
+    expect(session.json()).toMatchObject({ username: "aodo", roles: ["weknora-admin"] });
+    await app.close();
+  });
+
+  it("rejects wrong passwords, forged forms, foreign origins, and throttles guessing", async () => {
+    const { app, verify } = await createFixture();
+    const wrong = await submitLogin(app, { username: "aodo", password: "wrong password" });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.headers["set-cookie"]).toBeUndefined();
+    expect(wrong.body).toContain("用户名或密码错误");
+    expect(wrong.body).toContain('value="aodo"');
+
+    const forged = await app.inject({
+      method: "POST",
+      url: "/mcp-console/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        form_token: `${Date.now()}.forged`,
+        username: "aodo",
+        password: PASSWORD,
+      }).toString(),
+    });
+    expect(forged.statusCode).toBe(400);
+
+    const foreign = await submitLogin(
+      app,
+      { username: "aodo", password: PASSWORD },
+      { origin: "https://evil.example" },
+    );
+    expect(foreign.statusCode).toBe(403);
+
+    await submitLogin(app, { username: "aodo", password: "wrong password" });
+    await submitLogin(app, { username: "aodo", password: "wrong password" });
+    const verifyCalls = verify.mock.calls.length;
+    const blocked = await submitLogin(app, { username: "aodo", password: PASSWORD });
+    expect(blocked.statusCode).toBe(429);
+    expect(verify.mock.calls.length).toBe(verifyCalls);
     await app.close();
   });
 
@@ -327,7 +382,6 @@ describe("MCP console HTTP app", () => {
         clientId,
         label: "工作账号",
         redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
-        templateClientIds: [CHATGPT_CLIENT_ID, "claude-weknora-read"],
       }),
     );
     expect((await policyStore.read()).clients.at(-1)).toMatchObject({
@@ -537,7 +591,7 @@ describe("MCP console HTTP app", () => {
     await app.close();
   });
 
-  it("still lists API keys when Keycloak is unavailable", async () => {
+  it("still lists API keys when the OAuth client store is unavailable", async () => {
     const { app, oauthClientManager } = await createFixture();
     oauthClientManager.listClients.mockRejectedValueOnce(new Error("down"));
     const cookie = await login(app);

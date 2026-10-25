@@ -31,7 +31,7 @@ WeKnora REST API
 ## 核心功能
 
 - 一个统一的远程 MCP 入口，例如 `https://mcp.example.com/mcp`
-- 使用 Keycloak 提供 OAuth 2.0 / OIDC 登录
+- 内置 OAuth 2.1 授权服务器（授权码 + PKCE），无需单独部署 Keycloak 等身份服务
 - 为 ChatGPT、Claude、Gemini 等 OAuth Client 独立配置权限
 - 支持“按能力”和“全权限”两种授权模式
 - 支持全部知识库或指定知识库 allow-list
@@ -120,7 +120,9 @@ Gemini 网页版在自定义 Connected Apps 的连接窗口中填写 MCP Server 
 - 静态 Token 只保存 SHA-256 哈希，生成后只显示一次
 - 本地文件导入只能访问 `ADMIN_IMPORT_ROOT` 下的规范化路径
 - OAuth Client Secret、Tenant API Key 和上游 token 不写入审计日志
-- 管理控制台使用独立管理员角色和最小化 Keycloak service-account 权限
+- 管理员密码使用 argon2id 哈希，登录失败按 IP 和全局限速
+- OAuth Client Secret 和 refresh token 只保存 SHA-256 哈希
+- 停用 OAuth Client 或撤销会话后，网关立即拒绝其已签发的 access token
 
 ## 运行组件
 
@@ -131,8 +133,7 @@ Gemini 网页版在自定义 Connected Apps 的连接窗口中填写 MCP Server 
 | WeKnora REST API | 保存和处理知识库数据 |
 | `tencent-weknora-mcp` | 提供腾讯官方 MCP 工具 |
 | Access Gateway | OAuth 验证、工具过滤和调用时授权 |
-| Keycloak | OAuth 2.0 / OIDC authorization server |
-| Management Console | OAuth Client 与 MCP 权限管理 |
+| Management Console | 内置 OAuth 授权服务器、管理员登录、OAuth Client 与 MCP 权限管理 |
 | OpenResty / Nginx | HTTPS、公开路由和反向代理 |
 
 网关、控制台和策略文件均部署在 WeKnora 官方目录之外，便于后续升级官方镜像。
@@ -161,7 +162,7 @@ npm start
 npm run start:console
 ```
 
-生产环境还需要官方 MCP、Keycloak、HTTPS reverse proxy、systemd 配置和受保护的 secret 文件。不要直接把示例环境文件中的占位值用于公网部署。
+生产环境还需要官方 MCP、HTTPS reverse proxy、systemd 配置和受保护的 secret 文件。不要直接把示例环境文件中的占位值用于公网部署。
 
 ## 部署与运维
 
@@ -184,20 +185,20 @@ npm run check:baseline
 
 ```text
 console/    MCP 管理控制台前端
-deploy/     Keycloak、systemd、OpenResty 和安装资产
+deploy/     systemd、OpenResty、安装与 Keycloak 迁移脚本
 docs/       客户端接入、运维和实现文档
 fixtures/   官方 MCP 工具 schema 审核基线
-scripts/    基线检查脚本
+scripts/    基线检查、管理员密码与 Keycloak 导入脚本
 src/        网关、认证、策略、控制台和上游客户端
 tests/      单元测试、集成测试和部署断言
 ```
 
 ## 已知限制
 
-- 当前部署资产以 Keycloak、systemd 和 OpenResty 为主要参考实现
+- 当前部署资产以 systemd 和 OpenResty 为主要参考实现
+- 内置授权服务器只支持单一管理员资源所有者，不提供多用户、SSO 或动态客户端注册
 - API Key 和 Tenant 成员管理不属于当前官方 MCP 工具集，因此控制台不提供对应操作
 - `create_knowledge_from_file` 使用服务器本地路径，网页客户端不能直接上传任意本机文件路径
-- OAuth Client 被禁用或会话被撤销后，已签发 JWT 仍可能在原有效期内继续有效
 - 全权限模式不会替代客户端自身对危险操作的确认机制
 
 ## License

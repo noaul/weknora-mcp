@@ -9,6 +9,9 @@ curl --fail --silent --show-error \
 curl --fail --silent --show-error \
   "$base/.well-known/oauth-authorization-server/oauth/realms/weknora" | jq .issuer
 
+curl --fail --silent --show-error \
+  "$base/oauth/realms/weknora/protocol/openid-connect/certs" | jq '.keys | length'
+
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --request POST "$base/mcp" \
   --header 'Content-Type: application/json' \

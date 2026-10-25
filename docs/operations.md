@@ -8,8 +8,7 @@
 | `18192` | Existing LobeHub MCP | private bridge, unchanged |
 | `18193` | Official WeKnora MCP upstream | loopback |
 | `18194` | Unified OAuth gateway | loopback, published as `/mcp` |
-| `18195` | Keycloak | loopback, selected `/oauth` routes published |
-| `18198` | MCP management console | loopback, published as `/mcp-console/` |
+| `18198` | MCP management console and OAuth server | loopback, published as `/mcp-console/` and `/oauth/realms/weknora/` |
 
 The official WeKnora files and images under `/opt/weknora` are not modified.
 The gateway and console use independent release, configuration, and state paths.
@@ -18,9 +17,12 @@ The gateway and console use independent release, configuration, and state paths.
 
 - Upstream environment: `/etc/weknora-mcp-gateway.env`
 - Gateway environment/token: `/etc/weknora-mcp-access-gateway/`
-- Keycloak environment: `/opt/weknora-mcp-access-gateway/deploy/keycloak.env`
 - Console environment/secrets: `/etc/weknora-mcp-console/`
 - Access policy, audit, and static-token hashes: `/var/lib/weknora-mcp-console/`
+- OAuth clients and grants (`oauth-clients.json`, mode `0640`, readable by the
+  gateway), token signing key (`oauth-signing-key.json`, `0600`), and
+  administrator password hashes (`admin-users.json`, `0600`):
+  `/var/lib/weknora-mcp-console/`
 - Gateway session ownership: `/var/lib/weknora-mcp-access-gateway/` (systemd
   `StateDirectory`)
 - Approved server-local imports: `/var/lib/weknora-mcp-import/`
@@ -32,8 +34,8 @@ separate upstream bearer token protects the loopback MCP transport.
 ## Installation and migration
 
 1. Run `npm ci`, `npm test`, `npm run typecheck`, and `npm run build`.
-2. Back up systemd units, OpenResty configuration, Keycloak realm/client data,
-   gateway environment files, and the current policy file.
+2. Back up systemd units, OpenResty configuration, gateway and console
+   environment files, and `/var/lib/weknora-mcp-console/`.
 3. Copy the release to `/opt/weknora-mcp-console` and run
    `deploy/scripts/install-console.sh`.
 4. Update `/etc/weknora-mcp-access-gateway/gateway.env` from
@@ -41,7 +43,9 @@ separate upstream bearer token protects the loopback MCP transport.
 5. Update `/etc/weknora-mcp-console/console.env` from
    `deploy/systemd/console.env.example`.
 6. Install the upstream, gateway, and console systemd units.
-7. Run `deploy/scripts/configure-keycloak.sh`.
+7. Create the console administrator:
+   `sudo -u weknora-console node dist/scripts/set-admin-password.js <username>`
+   (the password is read from stdin).
 8. Install the OpenResty fragment, validate configuration, and reload.
 9. Restart the upstream, gateway, and console, then run `probe.sh`.
 
@@ -49,40 +53,60 @@ The policy reader automatically migrates a version-1 knowledge policy to
 version 2 in memory. Both retained clients initially receive `knowledge.read`
 over the prior allow-list. The next console update persists version 2.
 
-The Keycloak migration preserves the existing `chatgpt-weknora-read` and
-`claude-weknora-read` secrets and callback URIs. It attaches `weknora:mcp`
-before removing obsolete clients and scopes.
+## Migrating from Keycloak
 
-## Console sidecar
+Earlier releases used a separate Keycloak and PostgreSQL deployment
+(about 470 MB of memory). The embedded server keeps the issuer
+`https://wek.uov.me/oauth/realms/weknora` and the realm's endpoint paths, so
+ChatGPT, Claude, and Gemini connectors keep their URL, Client ID, and Client
+Secret. Their Keycloak-issued refresh tokens end with the cutover, so each
+connector asks to sign in once more.
 
-The console callback is:
+1. Stop the console, then import the OAuth clients (secret, callbacks, enabled
+   state) and the `weknora-admin` users (argon2 password hash and subject id)
+   while Keycloak still runs. Nothing is written to disk in plain text:
+
+   ```bash
+   deploy/scripts/export-keycloak.sh | sudo -u weknora-console \
+     node /opt/weknora-mcp-console/dist/scripts/import-keycloak.js
+   ```
+
+2. Point the gateway's `OAUTH_JWKS_URL` at
+   `http://127.0.0.1:18198/oauth/realms/weknora/protocol/openid-connect/certs`
+   and add `MCP_OAUTH_CLIENT_FILE`.
+3. Remove the `OAUTH_JWKS_URL`, `OAUTH_TOKEN_URL`, `OAUTH_CLIENT_*`,
+   `OAUTH_REQUIRED_ROLE`, and `KEYCLOAK_*` lines from `console.env` and delete
+   the `oauth-client-secret` and `keycloak-admin-client-secret` files.
+4. Install the new OpenResty fragment, restart the console and gateway, and run
+   `probe.sh`.
+5. Stop Keycloak with `docker compose -f deploy/keycloak-compose.yml down`
+   from the previous release. Keep its database volume until every connector
+   has signed in again; afterwards remove it with `down -v`.
+
+## Console and authorization server
+
+The console login page is:
 
 ```text
-https://wek.uov.me/mcp-console/oauth/callback
+https://wek.uov.me/mcp-console/login
 ```
 
-The console login client uses the `weknora-admin` realm role. This role controls
-access to the management UI, not the MCP client's effective permissions.
+The same administrator account signs in to the console and authorizes the
+ChatGPT, Claude, and Gemini connectors. Failed logins are limited to 10 per
+address and 50 overall per 15 minutes.
 
-The `weknora-mcp-console-admin` service account has only the Keycloak client and
-user management roles needed to manage the two allow-listed external clients,
-rotate their secrets, and revoke sessions. Existing secrets are never returned.
+The embedded OAuth 2.1 server supports the authorization-code flow with
+mandatory S256 PKCE, confidential clients (`client_secret_basic` or
+`client_secret_post`), refresh tokens, and RFC 7009 revocation. Access tokens
+are ES256 JWTs valid for ten minutes with audience `https://wek.uov.me/mcp` and
+scope `weknora:mcp`. Refresh tokens expire after 30 days without use and at the
+latest 180 days after the authorization. The signing key is created on first
+start; deleting `oauth-signing-key.json` and restarting the console invalidates
+every issued access token.
 
 The console can edit OAuth settings, access type, capabilities, knowledge-base
 scope, and default knowledge base. API Key and tenant-member management remain
 unavailable because the reviewed official MCP exposes no corresponding tools.
-
-## Login theme
-
-`deploy/keycloak/themes/weknora` is a Keycloak login theme that layers a
-ChatGPT-style stylesheet and Chinese messages on the stock `keycloak.v2`
-templates. `keycloak-compose.yml` mounts it read-only into the Keycloak
-container and `configure-keycloak.sh` selects it with `loginTheme=weknora`. The
-same login page is used by the console and by the ChatGPT/Claude OAuth flows.
-
-Keycloak caches themes in production mode, so recreate the Keycloak container
-after changing theme files. To roll back, set the realm login theme to
-`keycloak.v2` in the admin console or with `kcadm.sh`.
 
 ## Import directory
 
@@ -135,13 +159,17 @@ clients (`token-weknora`, `xiaomi-weknora-token`, …) into per-key
 `apikey-<id>` clients that keep the shared client's access, then removes the
 legacy policy entries.
 
-Disabling a client or revoking its Keycloak sessions does not invalidate an
-already issued JWT until that token expires. The current realm access-token
-lifetime is ten minutes.
+Disabling a client, deleting it, or revoking its sessions takes effect
+immediately: the gateway checks every OAuth access token against the client
+and grant state in `oauth-clients.json`.
+
+Reset a forgotten administrator password with
+`sudo -u weknora-console node dist/scripts/set-admin-password.js <username>`.
 
 ## Rollback
 
-Keep a pre-cutover release directory, policy backup, Keycloak export, OpenResty
-fragment, and git tag. Roll back the three sidecar services and configuration as
+Keep a pre-cutover release directory, a backup of
+`/var/lib/weknora-mcp-console/`, the environment files, the OpenResty fragment,
+and a git tag. Roll back the three sidecar services and configuration as
 one unit; the official WeKnora deployment and the existing service on port
 `18192` remain unchanged.

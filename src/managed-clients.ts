@@ -3,7 +3,7 @@ import type {
   FileMcpAccessPolicyStore,
   ManagedAccessClient,
 } from "./access-policy.js";
-import { MANAGED_OAUTH_CLIENTS } from "./keycloak-admin.js";
+import { MANAGED_OAUTH_CLIENTS } from "./oauth-clients.js";
 import {
   API_KEY_CLIENT_PREFIX,
   apiKeyClientId,

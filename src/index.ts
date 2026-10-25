@@ -2,10 +2,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { FileMcpAccessPolicyStore } from "./access-policy.js";
-import { createRemoteJwtAccessTokenVerifier } from "./auth.js";
+import { AuthenticationError, createRemoteJwtAccessTokenVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { parseConfig } from "./config.js";
 import { MANAGED_ACCESS_CLIENTS } from "./managed-clients.js";
+import { FileOAuthClientStore } from "./oauth-clients.js";
 import { retry } from "./retry.js";
 import { FileSessionOwnershipStore } from "./session-ownership.js";
 import { createCombinedTokenVerifier, FileStaticTokenStore } from "./static-tokens.js";
@@ -42,14 +43,28 @@ async function main(): Promise<void> {
     throw new Error("No upstream tool matches the reviewed baseline");
   }
 
+  const issuer = config.oauthIssuer.toString().replace(/\/$/, "");
+  const verifyJwt = createRemoteJwtAccessTokenVerifier({
+    issuer,
+    audience: config.publicMcpUrl.toString(),
+    requiredScope: config.oauthRequiredScope,
+    jwksUrl: config.oauthJwksUrl,
+  });
+  const oauthClients = new FileOAuthClientStore({ file: config.oauthClientFile, issuer });
   const verifyToken = createCombinedTokenVerifier({
     staticTokens: new FileStaticTokenStore({ file: config.staticTokenFile }),
-    oauth: createRemoteJwtAccessTokenVerifier({
-      issuer: config.oauthIssuer.toString().replace(/\/$/, ""),
-      audience: config.publicMcpUrl.toString(),
-      requiredScope: config.oauthRequiredScope,
-      jwksUrl: config.oauthJwksUrl,
-    }),
+    // Disabling a client or revoking its sessions takes effect immediately.
+    oauth: async (token) => {
+      const principal = await verifyJwt(token);
+      if (
+        !principal.clientId ||
+        !principal.grantId ||
+        !(await oauthClients.isGrantActive(principal.clientId, principal.grantId))
+      ) {
+        throw new AuthenticationError("OAuth grant is not active");
+      }
+      return principal;
+    },
     scope: config.oauthRequiredScope,
   });
   const app = buildApp({
