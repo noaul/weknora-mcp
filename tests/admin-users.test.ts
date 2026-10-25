@@ -130,6 +130,40 @@ describe("console administrators", () => {
 });
 
 describe("login throttle", () => {
+  it("counts in-flight checks across addresses until each reservation is released", () => {
+    let now = 0;
+    const throttle = new LoginThrottle({ perIp: 1, global: 2, windowMs: 1_000, now: () => now });
+    const releaseA = throttle.reserve("a");
+    const releaseB = throttle.reserve("b");
+    expect(releaseA).toEqual(expect.any(Function));
+    expect(releaseB).toEqual(expect.any(Function));
+    expect(throttle.reserve("a")).toBeUndefined();
+    expect(throttle.reserve("c")).toBeUndefined();
+    now = 1_001;
+    expect(throttle.blocked("a")).toBe(true);
+    releaseA!();
+    releaseA!(); // A release is idempotent and cannot free another check's slot.
+    expect(throttle.blocked("a")).toBe(false);
+    expect(throttle.blocked("b")).toBe(true);
+    const releaseC = throttle.reserve("c");
+    expect(throttle.blocked("d")).toBe(true);
+    throttle.fail("b");
+    releaseB!();
+    expect(throttle.blocked("b")).toBe(true);
+    releaseC!();
+    throttle.reset("b");
+    expect(throttle.blocked("b")).toBe(false);
+  });
+
+  it("caps expensive password checks independently of the failure budget", () => {
+    const throttle = new LoginThrottle({ perIp: 10, global: 50, windowMs: 60_000 });
+    const releases = Array.from({ length: 4 }, (_, index) => throttle.reserve(`ip-${index}`));
+    expect(releases.every((release) => typeof release === "function")).toBe(true);
+    expect(throttle.reserve("another-ip")).toBeUndefined();
+    releases[0]!();
+    expect(throttle.reserve("another-ip")).toEqual(expect.any(Function));
+  });
+
   it("limits failures per address and globally within a window", () => {
     let now = 0;
     const throttle = new LoginThrottle({ perIp: 2, global: 3, windowMs: 1_000, now: () => now });

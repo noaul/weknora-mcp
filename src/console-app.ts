@@ -383,15 +383,23 @@ export function buildConsoleApp(options: BuildConsoleAppOptions) {
       return renderLogin(reply, 400, { error: "登录页面已过期，请重新输入。" });
     }
     const ip = request.ip;
-    if (options.login.throttle.blocked(ip)) {
+    const release = options.login.throttle.reserve(ip);
+    if (!release) {
       return renderLogin(reply, 429, {
         username: form.data.username,
-        error: "失败次数过多，请 15 分钟后再试。",
+        error: "登录尝试过多，请稍后再试。",
       });
     }
-    const identity = await options.login.users.verify(form.data.username, form.data.password);
+    const identity = await (async () => {
+      try {
+        const result = await options.login.users.verify(form.data.username, form.data.password);
+        if (!result) options.login.throttle.fail(ip);
+        return result;
+      } finally {
+        release();
+      }
+    })();
     if (!identity) {
-      options.login.throttle.fail(ip);
       request.log.warn("console login failed");
       return renderLogin(reply, 401, {
         username: form.data.username,

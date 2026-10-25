@@ -107,6 +107,7 @@ const authorizeQuerySchema = z.object({
   code_challenge: z.string().optional(),
   code_challenge_method: z.string().optional(),
   prompt: z.string().optional(),
+  resource: z.string().max(2_048).optional(),
 });
 
 const authorizeFormSchema = z.object({
@@ -276,6 +277,9 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
           iss: endpoints.issuer,
         }),
       );
+    if (params.resource !== undefined && params.resource !== options.resource) {
+      return fail("invalid_target", "Only the configured MCP resource is supported");
+    }
     if (params.response_type !== "code") {
       return fail("unsupported_response_type", "Only the authorization code flow is supported");
     }
@@ -325,16 +329,24 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
       );
     }
     const ip = request.ip;
-    if (options.throttle.blocked(ip)) {
+    const release = options.throttle.reserve(ip);
+    if (!release) {
       return renderAuthorize(reply, authorization, client, {
         username: form.data.username,
-        error: "失败次数过多，请 15 分钟后再试。",
+        error: "登录尝试过多，请稍后再试。",
         status: 429,
       });
     }
-    const identity = await options.users.verify(form.data.username, form.data.password);
+    const identity = await (async () => {
+      try {
+        const result = await options.users.verify(form.data.username, form.data.password);
+        if (!result) options.throttle.fail(ip);
+        return result;
+      } finally {
+        release();
+      }
+    })();
     if (!identity) {
-      options.throttle.fail(ip);
       request.log.warn({ clientId: client.clientId }, "OAuth login failed");
       return renderAuthorize(reply, authorization, client, {
         username: form.data.username,
@@ -434,6 +446,10 @@ export function registerOAuthServer(app: FastifyInstance, options: OAuthServerOp
   app.post(`${issuerPath}/protocol/openid-connect/token`, async (request, reply) => {
     const client = await authenticateClient(request);
     if (!client) return oauthError(reply, 401, "invalid_client", "Client authentication failed");
+    const resource = (request.body as Record<string, unknown> | undefined)?.resource;
+    if (resource !== undefined && resource !== options.resource) {
+      return oauthError(reply, 400, "invalid_target", "Only the configured MCP resource is supported");
+    }
     const grantType = formString(request.body, "grant_type");
 
     if (grantType === "authorization_code") {

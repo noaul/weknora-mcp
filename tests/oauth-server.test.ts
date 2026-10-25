@@ -3,7 +3,7 @@ import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { FileMcpAccessPolicyStore } from "../src/access-policy.js";
 import { FileAdminUserStore, hashPassword, LoginThrottle } from "../src/admin-users.js";
@@ -84,7 +84,7 @@ async function createFixture() {
     }
     return principal;
   };
-  return { app, clients, keyFile, gatewayVerify };
+  return { app, clients, users, keyFile, gatewayVerify };
 }
 
 function pkce() {
@@ -323,6 +323,73 @@ describe("embedded OAuth authorization server", () => {
       payload: new URLSearchParams({ request, username: "aodo", password: PASSWORD }).toString(),
     });
     expect(foreign.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("shares concurrent password-check limits with the console", async () => {
+    const { app, users } = await createFixture();
+    const page = await app.inject({ method: "GET", url: authorizeUrl() });
+    const request = /name="request" value="([^"]+)"/.exec(page.body)![1]!;
+    const loginPage = await app.inject({ method: "GET", url: "/mcp-console/login" });
+    const formToken = /name="form_token" value="([^"]+)"/.exec(loginPage.body)![1]!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const verify = vi.spyOn(users, "verify").mockImplementation(async () => {
+      await gate;
+      return undefined;
+    });
+    const attempts = Array.from({ length: 8 }, (_, index) => app.inject({
+      method: "POST",
+      url: index % 2 === 0 ? AUTH_PATH : "/mcp-console/login",
+      headers: FORM,
+      payload: new URLSearchParams({
+        request,
+        form_token: formToken,
+        username: "aodo",
+        password: "wrong password",
+      }).toString(),
+    }));
+    try {
+      await vi.waitFor(() => expect(verify).toHaveBeenCalledTimes(3));
+    } finally {
+      release();
+    }
+    const responses = await Promise.all(attempts);
+    expect(responses.filter(({ statusCode }) => statusCode === 401)).toHaveLength(3);
+    expect(responses.filter(({ statusCode }) => statusCode === 429)).toHaveLength(5);
+    await app.close();
+  });
+
+  it("rejects unsupported resource indicators without consuming a valid code or refresh token", async () => {
+    const { app } = await createFixture();
+    const rejected = await app.inject({
+      method: "GET",
+      url: authorizeUrl({ resource: "https://other.example/mcp" }),
+    });
+    expect(rejected.statusCode).toBe(302);
+    expect(new URL(rejected.headers.location as string).searchParams.get("error")).toBe("invalid_target");
+
+    const { verifier, challenge } = pkce();
+    const code = new URL((await authorize(app, challenge)).headers.location as string).searchParams.get("code")!;
+    const wrongResource = await exchange(app, code, verifier, { resource: "https://other.example/mcp" });
+    expect(wrongResource.statusCode).toBe(400);
+    expect(wrongResource.json().error).toBe("invalid_target");
+    const tokens = await exchange(app, code, verifier, { resource: MCP_URL });
+    expect(tokens.statusCode).toBe(200);
+    for (const resource of ["https://other.example/mcp", MCP_URL]) {
+      const refreshed = await app.inject({
+        method: "POST",
+        url: TOKEN_PATH,
+        headers: { ...FORM, authorization: basic() },
+        payload: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: tokens.json().refresh_token,
+          resource,
+        }).toString(),
+      });
+      expect(refreshed.statusCode).toBe(resource === MCP_URL ? 200 : 400);
+      if (resource !== MCP_URL) expect(refreshed.json().error).toBe("invalid_target");
+    }
     await app.close();
   });
 

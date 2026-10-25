@@ -93,13 +93,19 @@ https://wek.uov.me/mcp-console/login
 
 The same administrator account signs in to the console and authorizes the
 ChatGPT, Claude, and Gemini connectors. Failed logins are limited to 10 per
-address and 50 overall per 15 minutes.
+address and 50 overall per 15 minutes. The console and OAuth login endpoints
+share these limits and count in-flight password checks against them. At most
+four password checks run at once across both endpoints; excess attempts return
+HTTP 429 and can be retried later.
 
 The embedded OAuth 2.1 server supports the authorization-code flow with
 mandatory S256 PKCE, confidential clients (`client_secret_basic` or
 `client_secret_post`), refresh tokens, and RFC 7009 revocation. Access tokens
 are ES256 JWTs valid for ten minutes with audience `https://wek.uov.me/mcp` and
-scope `weknora:mcp`. Refresh tokens expire after 30 days without use and at the
+scope `weknora:mcp`. When a client supplies the optional OAuth `resource`
+parameter on an authorization or token request, it must exactly match
+`PUBLIC_MCP_URL`; other resources return `invalid_target`. Omitting the
+parameter continues to target the configured MCP endpoint. Refresh tokens expire after 30 days without use and at the
 latest 180 days after the authorization. The signing key is created on first
 start; deleting `oauth-signing-key.json` and restarting the console invalidates
 every issued access token.

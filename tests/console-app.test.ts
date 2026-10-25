@@ -274,6 +274,39 @@ describe("MCP console HTTP app", () => {
     await app.close();
   });
 
+  it("reserves login capacity before concurrent password checks", async () => {
+    const { app, verify } = await createFixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    verify.mockImplementation(async () => {
+      await gate;
+      return undefined;
+    });
+    const attempts = Array.from({ length: 8 }, () =>
+      submitLogin(app, { username: "aodo", password: "wrong password" }),
+    );
+    try {
+      await vi.waitFor(() => expect(verify).toHaveBeenCalledTimes(3));
+    } finally {
+      release();
+    }
+    const responses = await Promise.all(attempts);
+    expect(responses.filter(({ statusCode }) => statusCode === 401)).toHaveLength(3);
+    expect(responses.filter(({ statusCode }) => statusCode === 429)).toHaveLength(5);
+    await app.close();
+  });
+
+  it("releases password-check capacity when verification fails unexpectedly", async () => {
+    const { app, verify } = await createFixture();
+    for (let index = 0; index < 4; index += 1) {
+      verify.mockRejectedValueOnce(new Error("user store unavailable"));
+      const response = await submitLogin(app, { username: "aodo", password: PASSWORD });
+      expect(response.statusCode).toBe(500);
+    }
+    expect((await submitLogin(app, { username: "aodo", password: PASSWORD })).statusCode).toBe(303);
+    await app.close();
+  });
+
   it("returns a secret-free overview with one gateway health status", async () => {
     const { app } = await createFixture();
     const cookie = await login(app);

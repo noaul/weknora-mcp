@@ -11,6 +11,8 @@ import type { ConsoleIdentity } from "./console-auth.js";
 export const ADMIN_ROLE = "weknora-admin";
 export const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 256;
+// Bound Argon2 memory use even when attempts come from different addresses.
+const MAX_CONCURRENT_PASSWORD_CHECKS = 4;
 
 /** OWASP-recommended argon2id parameters (19 MiB, 2 passes). */
 const ARGON2 = { memorySize: 19_456, iterations: 2, parallelism: 1, hashLength: 32 };
@@ -189,6 +191,8 @@ export class FileAdminUserStore {
 export class LoginThrottle {
   private readonly failures = new Map<string, number[]>();
   private global: number[] = [];
+  private readonly inFlight = new Map<string, number>();
+  private activeChecks = 0;
 
   constructor(
     private readonly options: {
@@ -202,9 +206,26 @@ export class LoginThrottle {
   blocked(ip: string): boolean {
     this.prune();
     return (
-      (this.failures.get(ip)?.length ?? 0) >= this.options.perIp ||
-      this.global.length >= this.options.global
+      (this.failures.get(ip)?.length ?? 0) + (this.inFlight.get(ip) ?? 0) >= this.options.perIp ||
+      this.global.length + this.activeChecks >= this.options.global ||
+      this.activeChecks >= MAX_CONCURRENT_PASSWORD_CHECKS
     );
+  }
+
+  /** Reserve before awaiting password verification; release in a finally block. */
+  reserve(ip: string): (() => void) | undefined {
+    if (this.blocked(ip)) return undefined;
+    this.inFlight.set(ip, (this.inFlight.get(ip) ?? 0) + 1);
+    this.activeChecks += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.inFlight.get(ip) ?? 1) - 1;
+      if (remaining === 0) this.inFlight.delete(ip);
+      else this.inFlight.set(ip, remaining);
+      this.activeChecks -= 1;
+    };
   }
 
   fail(ip: string): void {
